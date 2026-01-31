@@ -64,8 +64,23 @@ export const REDIS_KEYS = {
   /** Password reset token: pwreset:{token} */
   PASSWORD_RESET: 'pwreset:',
 
+  /** Email verification code: email_code:{email} */
+  EMAIL_CODE: 'email_code:',
+
   /** Email verification token: emailverify:{token} */
   EMAIL_VERIFY: 'emailverify:',
+
+  /** Phone verification code: phone_code:{phone} */
+  PHONE_CODE: 'phone_code:',
+
+  /** MFA secret (temporary during setup): mfa_setup:{userId} */
+  MFA_SETUP: 'mfa_setup:',
+
+  /** RBAC permission cache: rbac:{userId}:{tenantId} */
+  RBAC: 'rbac:',
+
+  /** Tenant config cache: tenant_config:{tenantId} */
+  TENANT_CONFIG: 'tenant_config:',
 } as const;
 
 /**
@@ -83,6 +98,21 @@ export const REDIS_TTL = {
 
   /** Email verification: 24 hours */
   EMAIL_VERIFY: 24 * 60 * 60,
+
+  /** Email verification code: 15 minutes */
+  EMAIL_CODE: 15 * 60,
+
+  /** Phone verification code: 10 minutes */
+  PHONE_CODE: 10 * 60,
+
+  /** MFA setup (temporary secret): 10 minutes */
+  MFA_SETUP: 10 * 60,
+
+  /** RBAC permission cache: 5 minutes */
+  RBAC: 5 * 60,
+
+  /** Tenant config cache: 5 minutes */
+  TENANT_CONFIG: 5 * 60,
 
   /** Rate limit window: 15 minutes */
   RATE_LIMIT: 15 * 60,

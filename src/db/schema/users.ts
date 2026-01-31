@@ -59,6 +59,10 @@ export const users = pgTable(
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
     passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }),
 
+    // Administrative blocking (different from login lockout)
+    blockedUntil: timestamp('blocked_until', { withTimezone: true }),
+    blockReason: varchar('block_reason', { length: 100 }),
+
     // Metadata
     metadata: jsonb('metadata').default({}),
 
