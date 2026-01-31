@@ -35,8 +35,8 @@ jobs:
         with:
           SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           REMOTE_HOST: 178.156.195.2
-          REMOTE_USER: zygo
-          TARGET: /home/zygo/zygo-backend/
+          REMOTE_USER: root
+          TARGET: /opt/zygo/backend/
           SOURCE: "./"
           EXCLUDE: "node_modules/, .git/, .env"
           ARGS: "-avz --delete"
@@ -45,11 +45,11 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: 178.156.195.2
-          username: zygo
+          username: root
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
-            cd /home/zygo/zygo-backend
+            cd /opt/zygo/backend
             npm ci --production
-            pm2 restart zygo-backend || pm2 start dist/index.js --name zygo-backend
+            pm2 restart zygo-api
             pm2 save
             echo "Backend restarted successfully"
