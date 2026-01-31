@@ -8,8 +8,8 @@
 | **Framework** | Hono 4.x + TypeScript |
 | **Domain** | api.zygo.tech |
 | **Server** | 178.156.195.2 |
-| **Deploy Path** | /home/zygo/zygo-backend/ |
-| **Process Manager** | PM2 (zygo-backend) |
+| **Deploy Path** | /opt/zygo/backend/ |
+| **Process Manager** | PM2 (zygo-api) |
 
 ## Tech Stack
 
