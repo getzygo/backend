@@ -1,0 +1,6339 @@
+openapi: 3.1.0
+info:
+  title: Zygo Platform API
+  description: |
+    Complete API specification for the Zygo AI-driven workflow platform.
+
+    ## Authentication
+    All endpoints require authentication via JWT bearer token unless marked otherwise.
+
+    ## Multi-Tenancy
+    - **Tenant Mode**: Token includes `tenant_id` and `tenant_slug` claims
+    - **Global Admin Mode**: Token includes `is_global_admin: true` claim
+
+    ## Headers
+    - `Authorization: Bearer {token}` - Required for authenticated endpoints
+    - `X-Zygo-Mode: tenant | global-admin` - Mode indicator (informational)
+    - `X-Zygo-Tenant-Slug: {slug}` - Tenant slug (informational, in tenant mode)
+  version: 2.0.0
+  contact:
+    name: Zygo API Team
+    email: api@zygo.tech
+  license:
+    name: Proprietary
+    url: https://zygo.tech/terms
+
+servers:
+  - url: https://api.zygo.tech/v1
+    description: Production API
+  - url: https://api.staging.zygo.tech/v1
+    description: Staging API
+  - url: http://localhost:3001/v1
+    description: Local development
+
+tags:
+  - name: Auth
+    description: Authentication and session management
+  - name: Users
+    description: User management within a tenant
+  - name: Roles
+    description: Role and permission management
+  - name: Tenant
+    description: Tenant configuration and settings
+  - name: Infrastructure
+    description: Cloud infrastructure resources
+  - name: Webhooks
+    description: Webhook management
+  - name: Secrets
+    description: Environment variables and secrets
+  - name: Billing
+    description: Billing, subscriptions, and payments
+  - name: Compliance
+    description: GDPR/CCPA data protection endpoints
+  - name: Audit
+    description: Audit logging endpoints
+  - name: Admin
+    description: Global admin endpoints
+  - name: Node
+    description: Node runtime SDK endpoints
+
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token with tenant_id and user_id claims
+
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+      description: Session cookie for web clients
+
+  schemas:
+    # ==========================================
+    # Core Types
+    # ==========================================
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        avatar:
+          type: string
+          format: uri
+        role:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, suspended, invited]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, email, name, role, status]
+
+    Tenant:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+          pattern: '^[a-z0-9-]{3,63}$'
+        name:
+          type: string
+        plan:
+          type: string
+          enum: [free, starter, professional, enterprise]
+        status:
+          type: string
+          enum: [active, suspended, trial]
+        logo:
+          type: string
+          format: uri
+      required: [id, slug, name, plan, status]
+
+    TenantConfig:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [active, suspended, trial]
+        plan:
+          type: object
+          properties:
+            name:
+              type: string
+            tier:
+              type: string
+              enum: [free, starter, professional, enterprise]
+            features:
+              type: array
+              items:
+                type: string
+        branding:
+          type: object
+          properties:
+            logo:
+              type: string
+              format: uri
+            primaryColor:
+              type: string
+              pattern: '^#[0-9A-Fa-f]{6}$'
+            customDomain:
+              type: string
+        settings:
+          type: object
+          properties:
+            ssoEnabled:
+              type: boolean
+            mfaRequired:
+              type: boolean
+            ipWhitelist:
+              type: array
+              items:
+                type: string
+        limits:
+          type: object
+          properties:
+            maxUsers:
+              type: integer
+            maxNodes:
+              type: integer
+            maxExecutionsPerMonth:
+              type: integer
+            maxStorage:
+              type: integer
+              description: Storage limit in bytes
+        usage:
+          type: object
+          properties:
+            users:
+              type: integer
+            nodes:
+              type: integer
+            executionsThisMonth:
+              type: integer
+            storageUsed:
+              type: integer
+
+    Session:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        tenant:
+          $ref: '#/components/schemas/Tenant'
+        tenants:
+          type: array
+          items:
+            $ref: '#/components/schemas/Tenant'
+        roles:
+          type: array
+          items:
+            type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        featureFlags:
+          type: object
+          additionalProperties:
+            type: boolean
+
+    Role:
+      type: object
+      description: Role definition supporting both system (predefined) and custom roles
+      properties:
+        id:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Unique identifier within tenant (e.g., security_auditor)
+          pattern: '^[a-z][a-z0-9_]{2,49}$'
+        display_name:
+          type: string
+          description: Human-readable name (e.g., Security Auditor)
+        description:
+          type: string
+        is_system:
+          type: boolean
+          description: True for predefined system roles, false for custom roles
+        permissions:
+          type: array
+          items:
+            type: string
+          description: Array of permission keys (e.g., canViewServers, canManageUsers)
+        members_count:
+          type: integer
+          description: Number of users assigned to this role
+        hierarchy:
+          type: integer
+          minimum: 1
+          maximum: 100
+          description: Privilege level (lower = more privileged). Owner=1, Viewer=90
+        created_by:
+          type: string
+          format: uuid
+          description: User ID who created this role (null for system roles)
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, name, is_system, permissions, hierarchy]
+
+    CreateRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{2,49}$'
+          description: Unique identifier (lowercase, underscores allowed)
+        display_name:
+          type: string
+        description:
+          type: string
+        hierarchy:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+        permissions:
+          type: array
+          items:
+            type: string
+          minItems: 1
+          description: At least one permission required
+      required: [name, permissions]
+
+    UpdateRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{2,49}$'
+        display_name:
+          type: string
+        description:
+          type: string
+        hierarchy:
+          type: integer
+          minimum: 1
+          maximum: 100
+        permissions:
+          type: array
+          items:
+            type: string
+          minItems: 1
+
+    DuplicateRoleRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z][a-z0-9_]{2,49}$'
+        display_name:
+          type: string
+        description:
+          type: string
+      required: [name]
+
+    RoleMember:
+      type: object
+      properties:
+        user_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        assigned_at:
+          type: string
+          format: date-time
+        assigned_by:
+          type: string
+          format: uuid
+
+    Permission:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Permission identifier (e.g., canViewServers)
+        category:
+          type: string
+        description:
+          type: string
+        requiresMFA:
+          type: boolean
+        critical:
+          type: boolean
+
+    # ==========================================
+    # Infrastructure Types
+    # ==========================================
+
+    Server:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [running, stopped, provisioning, error]
+        ip_address:
+          type: string
+        region:
+          type: string
+        os:
+          type: string
+        server_type:
+          type: string
+        cpu_usage:
+          type: number
+        memory_usage:
+          type: number
+        disk_usage:
+          type: number
+        monthly_cost:
+          type: number
+        created_at:
+          type: string
+          format: date-time
+
+    Volume:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        size_gb:
+          type: integer
+        storage_type:
+          type: string
+          enum: [SSD, NVMe, HDD]
+        status:
+          type: string
+          enum: [attached, available, creating, error]
+        attached_to_server_id:
+          type: string
+          format: uuid
+        location:
+          type: string
+
+    Firewall:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum: [active, creating, error]
+        inbound_rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+        outbound_rules:
+          type: array
+          items:
+            $ref: '#/components/schemas/FirewallRule'
+        applied_servers:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    FirewallRule:
+      type: object
+      properties:
+        protocol:
+          type: string
+          enum: [tcp, udp, icmp, esp, gre]
+        port:
+          type: string
+        source_cidr:
+          type: string
+        action:
+          type: string
+          enum: [allow, deny]
+        description:
+          type: string
+
+    # ==========================================
+    # Webhook Types
+    # ==========================================
+
+    Webhook:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        url:
+          type: string
+          format: uri
+        events:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [active, paused, failing]
+        secret:
+          type: string
+          description: HMAC signing secret (write-only)
+        created_at:
+          type: string
+          format: date-time
+        last_triggered:
+          type: string
+          format: date-time
+        delivery_count:
+          type: integer
+        success_rate:
+          type: number
+
+    # ==========================================
+    # Billing Types
+    # ==========================================
+
+    PaymentMethod:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [card, paypal, revolut]
+        last4:
+          type: string
+        brand:
+          type: string
+        expiry_month:
+          type: string
+        expiry_year:
+          type: string
+        is_default:
+          type: boolean
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        invoice_number:
+          type: string
+          description: Human-readable invoice number (e.g., INV-2026-0001)
+        date:
+          type: string
+          format: date
+        due_date:
+          type: string
+          format: date
+        amount:
+          type: number
+        subtotal:
+          type: number
+        tax:
+          type: number
+        currency:
+          type: string
+          default: USD
+        status:
+          type: string
+          enum: [paid, pending, failed, refunded]
+        description:
+          type: string
+        line_items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InvoiceLineItem'
+        download_url:
+          type: string
+          format: uri
+        paid_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    InvoiceLineItem:
+      type: object
+      properties:
+        description:
+          type: string
+        quantity:
+          type: integer
+        unit_price:
+          type: number
+        amount:
+          type: number
+
+    # ==========================================
+    # Secrets & Environment Variables Schemas
+    # ==========================================
+
+    EnvironmentVariable:
+      type: object
+      description: Environment variable metadata (value NOT included)
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          description: Variable name (e.g., OPENAI_API_KEY)
+        display_name:
+          type: string
+        description:
+          type: string
+        service:
+          type: string
+          description: Service identifier (e.g., openai, custom)
+        type:
+          type: string
+          enum: [text, secret, multiline, url, number, json]
+        category:
+          type: string
+        scope:
+          type: string
+          enum: [workspace, project, runtime]
+        project_id:
+          type: string
+          format: uuid
+        value_preview:
+          type: string
+          description: "Masked preview: prefix••••suffix"
+        value_prefix:
+          type: string
+          description: First 6 characters
+        value_suffix:
+          type: string
+          description: Last 4 characters
+        is_encrypted:
+          type: boolean
+        can_rotate:
+          type: boolean
+        template_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          format: uuid
+        updated_at:
+          type: string
+          format: date-time
+        last_accessed_at:
+          type: string
+          format: date-time
+
+    EnvironmentVariableCreated:
+      type: object
+      description: Response when creating/updating variable (includes one-time value)
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        value:
+          type: string
+          description: "ONE-TIME DISPLAY: Full plaintext value"
+        value_prefix:
+          type: string
+        value_suffix:
+          type: string
+        scope:
+          type: string
+          enum: [workspace, project, runtime]
+        type:
+          type: string
+        service:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          format: uuid
+
+    ApiKey:
+      type: object
+      description: API key metadata (full key NOT included)
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        key_prefix:
+          type: string
+          description: "Key prefix for identification (e.g., zygo_live_sk_123...)"
+        permissions:
+          type: array
+          items:
+            type: string
+          description: "Granted permissions (servers:read, workflows:execute, etc.)"
+        status:
+          type: string
+          enum: [active, expired, revoked]
+        expires_at:
+          type: string
+          format: date-time
+        usage_count:
+          type: integer
+        last_used_at:
+          type: string
+          format: date-time
+        last_used_ip:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+        revoked_by:
+          type: string
+          format: uuid
+
+    ApiKeyCreated:
+      type: object
+      description: Response when creating API key (includes one-time full key)
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+          description: "ONE-TIME DISPLAY: Full API key"
+        prefix:
+          type: string
+        name:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        created_at:
+          type: string
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+
+    Template:
+      type: object
+      description: Environment variable template summary
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          description: Service name (e.g., OpenAI)
+        slug:
+          type: string
+        category:
+          type: string
+          enum: [llm, mcp, cloud, collaboration, development, payments, support, crm, project, storage, database, monitoring, authentication, social, marketing, infrastructure]
+        category_label:
+          type: string
+        icon:
+          type: string
+
+    TemplateConfig:
+      type: object
+      description: Full template configuration
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        slug:
+          type: string
+        category:
+          type: string
+        category_label:
+          type: string
+        icon:
+          type: string
+        credential_fields:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              label:
+                type: string
+              type:
+                type: string
+                enum: [text, password, email]
+              required:
+                type: boolean
+              placeholder:
+                type: string
+              help_text:
+                type: string
+        additional_fields:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              label:
+                type: string
+              type:
+                type: string
+              required:
+                type: boolean
+              placeholder:
+                type: string
+              help_text:
+                type: string
+        documentation:
+          type: array
+          items:
+            type: string
+          description: Setup instructions
+        documentation_url:
+          type: string
+          format: uri
+        setup_guide_url:
+          type: string
+          format: uri
+        credentials_url:
+          type: string
+          format: uri
+          description: Where to get credentials
+
+    # ==========================================
+    # Workflow & Node Schemas
+    # ==========================================
+
+    Workflow:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        description:
+          type: string
+        slug:
+          type: string
+        status:
+          type: string
+          enum: [draft, active, paused, archived]
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowNode'
+        edges:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkflowEdge'
+        version:
+          type: integer
+        created_by:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    WorkflowNode:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+          enum: [aiAgent, category]
+        position:
+          type: object
+          properties:
+            x:
+              type: number
+            y:
+              type: number
+        data:
+          type: object
+          properties:
+            label:
+              type: string
+            nodeType:
+              type: string
+              description: "Node type: trigger, llm, planner, memory_store, etc."
+            icon:
+              type: string
+            color:
+              type: string
+            config:
+              type: object
+              description: Node-specific configuration
+
+    WorkflowEdge:
+      type: object
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+          description: Source node ID
+        target:
+          type: string
+          description: Target node ID
+        sourceHandle:
+          type: string
+        targetHandle:
+          type: string
+
+    WorkflowExecution:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        workflow_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        triggered_by:
+          type: string
+          enum: [user, schedule, webhook, api]
+        input:
+          type: object
+        output:
+          type: object
+        node_executions:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeExecution'
+        triggered_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+        error:
+          type: object
+          properties:
+            node_id:
+              type: string
+            message:
+              type: string
+            stack:
+              type: string
+
+    NodeExecution:
+      type: object
+      properties:
+        node_id:
+          type: string
+        node_type:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, skipped]
+        input:
+          type: object
+        output:
+          type: object
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        duration_ms:
+          type: integer
+        error:
+          type: string
+
+    NodeType:
+      type: object
+      description: Available node type definition
+      properties:
+        id:
+          type: string
+          description: "Node type ID: ai_agent, llm, planner, etc."
+        label:
+          type: string
+        description:
+          type: string
+        icon:
+          type: string
+        color:
+          type: string
+        category:
+          type: string
+          enum: [orchestration, ai, integration, flow, operations]
+
+    NodeTypeConfig:
+      type: object
+      description: Node type with full configuration schema
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        description:
+          type: string
+        icon:
+          type: string
+        color:
+          type: string
+        category:
+          type: string
+        config_schema:
+          type: object
+          description: JSON Schema for node configuration
+        default_config:
+          type: object
+          description: Default configuration values
+
+    NodeTemplate:
+      type: object
+      description: Pre-built node template
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        node_type:
+          type: string
+        category:
+          type: string
+        config:
+          type: object
+        tags:
+          type: array
+          items:
+            type: string
+
+    DocumentationPage:
+      type: object
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        title:
+          type: string
+        category:
+          type: string
+        content:
+          type: string
+          description: Markdown content
+        read_time:
+          type: integer
+          description: Minutes to read
+        last_updated:
+          type: string
+          format: date-time
+        is_public:
+          type: boolean
+        meta_description:
+          type: string
+        keywords:
+          type: array
+          items:
+            type: string
+
+    Subscription:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        plan:
+          type: string
+          enum: [free, basic, business, enterprise]
+        status:
+          type: string
+          enum: [active, trial, canceled, past_due, paused]
+        billing_cycle:
+          type: string
+          enum: [monthly, annual]
+        price_per_user:
+          type: number
+        next_billing_date:
+          type: string
+          format: date
+        trial_ends_at:
+          type: string
+          format: date-time
+        cancel_at_period_end:
+          type: boolean
+        current_period_start:
+          type: string
+          format: date-time
+        current_period_end:
+          type: string
+          format: date-time
+        purchased_licenses:
+          type: integer
+        active_licenses:
+          type: integer
+        stripe_subscription_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    LicenseAllocation:
+      type: object
+      properties:
+        free:
+          $ref: '#/components/schemas/LicenseTier'
+        basic:
+          $ref: '#/components/schemas/LicenseTier'
+        business:
+          $ref: '#/components/schemas/LicenseTier'
+        total_purchased:
+          type: integer
+        total_active:
+          type: integer
+        total_available:
+          type: integer
+
+    LicenseTier:
+      type: object
+      properties:
+        purchased:
+          type: integer
+        active:
+          type: integer
+        available:
+          type: integer
+        price:
+          type: number
+
+    License:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        tier:
+          type: string
+          enum: [free, basic, business]
+        status:
+          type: string
+          enum: [active, inactive, pending]
+        assigned_to_user_id:
+          type: string
+          format: uuid
+        assigned_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    TokenUsage:
+      type: object
+      properties:
+        included:
+          type: integer
+          description: Monthly included tokens based on plan
+        used:
+          type: integer
+          description: Tokens used from monthly allocation
+        purchased:
+          type: integer
+          description: One-time purchased tokens (no expiration)
+        purchased_used:
+          type: integer
+          description: Tokens used from purchased pool
+        remaining:
+          type: integer
+          description: Total remaining tokens
+        reset_date:
+          type: string
+          format: date
+          description: When monthly tokens reset
+        usage_percentage:
+          type: number
+          description: Percentage of monthly allocation used
+
+    TokenPackage:
+      type: object
+      properties:
+        id:
+          type: string
+        tokens:
+          type: integer
+        price:
+          type: number
+        price_per_thousand:
+          type: number
+        savings_percentage:
+          type: number
+
+    TokenPurchase:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        package_id:
+          type: string
+        tokens:
+          type: integer
+        amount:
+          type: number
+        status:
+          type: string
+          enum: [completed, pending, failed, refunded]
+        purchased_at:
+          type: string
+          format: date-time
+
+    BillingInfo:
+      type: object
+      properties:
+        company_name:
+          type: string
+        billing_email:
+          type: string
+          format: email
+        billing_phone:
+          type: string
+        tax_id:
+          type: string
+        vat_number:
+          type: string
+
+    BillingAddress:
+      type: object
+      properties:
+        line1:
+          type: string
+        line2:
+          type: string
+        city:
+          type: string
+        state:
+          type: string
+        postal_code:
+          type: string
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2 country code
+
+    CheckoutSession:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [pending, processing, requires_action, succeeded, failed]
+        client_secret:
+          type: string
+          description: Stripe client secret for 3D Secure
+        return_url:
+          type: string
+          format: uri
+        amount:
+          type: number
+        currency:
+          type: string
+
+    ThreeDSecureChallenge:
+      type: object
+      properties:
+        challenge_id:
+          type: string
+        redirect_url:
+          type: string
+          format: uri
+        expires_at:
+          type: string
+          format: date-time
+
+    TeamMember:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+        joined_at:
+          type: string
+          format: date-time
+        license_status:
+          type: string
+          enum: [active, inactive, pending]
+        license_type:
+          type: string
+          enum: [free, basic, business]
+        avatar:
+          type: string
+          format: uri
+
+    PendingInvite:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+        invited_at:
+          type: string
+          format: date-time
+        invited_by:
+          type: string
+        status:
+          type: string
+          enum: [pending, expired, accepted]
+        expires_at:
+          type: string
+          format: date-time
+
+    MFASetup:
+      type: object
+      properties:
+        secret:
+          type: string
+          description: TOTP secret (base32 encoded)
+        qr_code_url:
+          type: string
+          format: uri
+          description: URL to QR code image
+        otpauth_url:
+          type: string
+          description: otpauth:// URL for manual entry
+        backup_codes:
+          type: array
+          items:
+            type: string
+          description: One-time backup codes
+
+    PasswordResetRequest:
+      type: object
+      properties:
+        request_id:
+          type: string
+          format: uuid
+        expires_at:
+          type: string
+          format: date-time
+        email_sent:
+          type: boolean
+
+    VerificationCode:
+      type: object
+      properties:
+        verified:
+          type: boolean
+        token:
+          type: string
+          description: Token for password reset (only on verification success)
+
+    # ==========================================
+    # Compliance Types
+    # ==========================================
+
+    ConsentRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        category:
+          type: string
+          enum: [essential, analytics, marketing, personalization]
+        granted:
+          type: boolean
+        version:
+          type: string
+        recorded_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+
+    DataExportRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [pending, processing, ready, expired]
+        format:
+          type: string
+          enum: [json, csv, pdf]
+        download_url:
+          type: string
+          format: uri
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    DataDeletionRequest:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [scheduled, processing, completed, cancelled]
+        scheduled_for:
+          type: string
+          format: date-time
+        grace_period_ends:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    # ==========================================
+    # Audit Types
+    # ==========================================
+
+    AuditLog:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        timestamp:
+          type: string
+          format: date-time
+        event_type:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        action:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [success, failure, warning]
+        actor:
+          type: object
+          properties:
+            user_id:
+              type: string
+              format: uuid
+            email:
+              type: string
+            role:
+              type: string
+            ip_address:
+              type: string
+        resource:
+          type: object
+          properties:
+            type:
+              type: string
+            id:
+              type: string
+            name:
+              type: string
+        integrity:
+          type: object
+          properties:
+            hash:
+              type: string
+            verified:
+              type: boolean
+
+    # ==========================================
+    # Error Types
+    # ==========================================
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+        field:
+          type: string
+      required: [error, message]
+
+    PaginatedResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items: {}
+        pagination:
+          type: object
+          properties:
+            total:
+              type: integer
+            page:
+              type: integer
+            per_page:
+              type: integer
+            total_pages:
+              type: integer
+            has_next:
+              type: boolean
+            has_prev:
+              type: boolean
+
+paths:
+  # ==========================================
+  # AUTH ENDPOINTS
+  # ==========================================
+
+  /session:
+    get:
+      tags: [Auth]
+      summary: Get current session
+      description: Bootstrap session data including user, tenant, roles, and permissions
+      operationId: getSession
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Session data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '401':
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    post:
+      tags: [Auth]
+      summary: Refresh session
+      description: Refresh session token and data
+      operationId: refreshSession
+      security:
+        - cookieAuth: []
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Refreshed session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: User login
+      description: Authenticate user with email and password
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+              required: [email, password]
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  refresh_token:
+                    type: string
+                  expires_in:
+                    type: integer
+                  session:
+                    $ref: '#/components/schemas/Session'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      summary: User logout
+      description: Invalidate current session
+      operationId: logout
+      responses:
+        '200':
+          description: Logout successful
+        '401':
+          description: Not authenticated
+
+  /auth/signup:
+    post:
+      tags: [Auth]
+      summary: User signup
+      description: Create new user and tenant
+      operationId: signup
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 8
+                company_name:
+                  type: string
+                  minLength: 2
+              required: [email, password, company_name]
+      responses:
+        '201':
+          description: Signup successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/permissions:
+    get:
+      tags: [Auth]
+      summary: Get user permissions
+      description: Get current user's role and permissions
+      operationId: getPermissions
+      responses:
+        '200':
+          description: User permissions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role:
+                    type: string
+                  permissions:
+                    type: array
+                    items:
+                      type: string
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      description: Exchange refresh token for new access token
+      operationId: refreshToken
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                refresh_token:
+                  type: string
+              required: [refresh_token]
+      responses:
+        '200':
+          description: Token refreshed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  refresh_token:
+                    type: string
+                  expires_in:
+                    type: integer
+                    description: Token expiry in seconds
+        '401':
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/forgot-password:
+    post:
+      tags: [Auth]
+      summary: Request password reset
+      description: Send password reset verification code to email
+      operationId: forgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+              required: [email]
+      responses:
+        '200':
+          description: Reset code sent (always returns success for security)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PasswordResetRequest'
+        '429':
+          description: Too many requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/verify-code:
+    post:
+      tags: [Auth]
+      summary: Verify reset code
+      description: Verify the 6-digit password reset code
+      operationId: verifyResetCode
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+                  description: 6-digit verification code
+              required: [email, code]
+      responses:
+        '200':
+          description: Code verified
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerificationCode'
+        '400':
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/reset-password:
+    post:
+      tags: [Auth]
+      summary: Reset password
+      description: Set new password using verified reset token
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+                  description: Token from verify-code response
+                new_password:
+                  type: string
+                  minLength: 8
+                  description: Must include uppercase, lowercase, number, special char
+              required: [token, new_password]
+      responses:
+        '200':
+          description: Password reset successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '400':
+          description: Invalid token or weak password
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/send-email-verification:
+    post:
+      tags: [Auth]
+      summary: Send email verification
+      description: Send verification code to user's email address
+      operationId: sendEmailVerification
+      responses:
+        '200':
+          description: Verification code sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent:
+                    type: boolean
+                  expires_at:
+                    type: string
+                    format: date-time
+        '429':
+          description: Too many requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/verify-email:
+    post:
+      tags: [Auth]
+      summary: Verify email address
+      description: Verify email with 6-digit code
+      operationId: verifyEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+              required: [code]
+      responses:
+        '200':
+          description: Email verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified:
+                    type: boolean
+                  email:
+                    type: string
+                    format: email
+        '400':
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/send-phone-verification:
+    post:
+      tags: [Auth]
+      summary: Send phone verification
+      description: Send verification code via SMS
+      operationId: sendPhoneVerification
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                phone_number:
+                  type: string
+                  description: Phone number with country code
+              required: [phone_number]
+      responses:
+        '200':
+          description: Verification code sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent:
+                    type: boolean
+                  masked_phone:
+                    type: string
+                    description: Masked phone number (e.g., ••••••89)
+                  expires_at:
+                    type: string
+                    format: date-time
+        '429':
+          description: Too many requests
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/verify-phone:
+    post:
+      tags: [Auth]
+      summary: Verify phone number
+      description: Verify phone with 6-digit code
+      operationId: verifyPhone
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+              required: [code]
+      responses:
+        '200':
+          description: Phone verified
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified:
+                    type: boolean
+                  phone_number:
+                    type: string
+        '400':
+          description: Invalid or expired code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/mfa/enable:
+    post:
+      tags: [Auth]
+      summary: Enable MFA
+      description: Enable two-factor authentication (TOTP)
+      operationId: enableMFA
+      responses:
+        '200':
+          description: MFA setup data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MFASetup'
+
+  /auth/mfa/verify:
+    post:
+      tags: [Auth]
+      summary: Verify MFA setup
+      description: Verify initial TOTP code to complete MFA setup
+      operationId: verifyMFASetup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+                  description: TOTP code from authenticator app
+              required: [code]
+      responses:
+        '200':
+          description: MFA enabled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                  backup_codes:
+                    type: array
+                    items:
+                      type: string
+                    description: One-time backup codes (shown once)
+        '400':
+          description: Invalid TOTP code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/mfa/disable:
+    post:
+      tags: [Auth]
+      summary: Disable MFA
+      description: Disable two-factor authentication
+      operationId: disableMFA
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  description: Current password for verification
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+                  description: Current TOTP code
+              required: [password, code]
+      responses:
+        '200':
+          description: MFA disabled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  disabled:
+                    type: boolean
+        '400':
+          description: Invalid password or code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/mfa/backup-codes:
+    post:
+      tags: [Auth]
+      summary: Regenerate backup codes
+      description: Generate new set of backup codes (invalidates old ones)
+      operationId: regenerateBackupCodes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+              required: [password]
+      responses:
+        '200':
+          description: New backup codes generated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backup_codes:
+                    type: array
+                    items:
+                      type: string
+                    description: 8 new backup codes
+
+  /auth/mfa/challenge:
+    post:
+      tags: [Auth]
+      summary: Verify MFA during login
+      description: Submit TOTP or backup code during login
+      operationId: verifyMFAChallenge
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                challenge_token:
+                  type: string
+                  description: Token from login response requiring MFA
+                code:
+                  type: string
+                  description: TOTP code or backup code
+              required: [challenge_token, code]
+      responses:
+        '200':
+          description: MFA verified, login complete
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  refresh_token:
+                    type: string
+                  expires_in:
+                    type: integer
+                  session:
+                    $ref: '#/components/schemas/Session'
+        '400':
+          description: Invalid code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/oauth/google:
+    get:
+      tags: [Auth]
+      summary: Initiate Google OAuth
+      description: Redirect to Google OAuth consent screen
+      operationId: googleOAuthInit
+      security: []
+      parameters:
+        - name: redirect_uri
+          in: query
+          schema:
+            type: string
+            format: uri
+      responses:
+        '302':
+          description: Redirect to Google
+
+  /auth/oauth/google/callback:
+    get:
+      tags: [Auth]
+      summary: Google OAuth callback
+      description: Handle Google OAuth callback
+      operationId: googleOAuthCallback
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to app with session
+
+  /auth/oauth/github:
+    get:
+      tags: [Auth]
+      summary: Initiate GitHub OAuth
+      description: Redirect to GitHub OAuth consent screen
+      operationId: githubOAuthInit
+      security: []
+      parameters:
+        - name: redirect_uri
+          in: query
+          schema:
+            type: string
+            format: uri
+      responses:
+        '302':
+          description: Redirect to GitHub
+
+  /auth/oauth/github/callback:
+    get:
+      tags: [Auth]
+      summary: GitHub OAuth callback
+      description: Handle GitHub OAuth callback
+      operationId: githubOAuthCallback
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: state
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '302':
+          description: Redirect to app with session
+
+  # ==========================================
+  # TENANT ENDPOINTS
+  # ==========================================
+
+  /tenants/{tenantSlug}/config:
+    get:
+      tags: [Tenant]
+      summary: Get tenant configuration
+      description: Load tenant configuration including plan, features, limits, and usage
+      operationId: getTenantConfig
+      parameters:
+        - name: tenantSlug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tenant configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/TenantConfig'
+        '404':
+          description: Tenant not found
+        '403':
+          description: Access denied
+
+  /tenant:
+    get:
+      tags: [Tenant]
+      summary: Get current tenant settings
+      operationId: getTenantSettings
+      responses:
+        '200':
+          description: Tenant settings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantConfig'
+
+    patch:
+      tags: [Tenant]
+      summary: Update tenant settings
+      operationId: updateTenantSettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                branding:
+                  type: object
+                settings:
+                  type: object
+      responses:
+        '200':
+          description: Updated tenant settings
+
+  /tenant/logo:
+    post:
+      tags: [Tenant]
+      summary: Upload tenant logo
+      operationId: uploadTenantLogo
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: Logo uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  logo_url:
+                    type: string
+                    format: uri
+
+  # ==========================================
+  # USER ENDPOINTS
+  # ==========================================
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List tenant users
+      operationId: listUsers
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, suspended, invited]
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: List of users
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/User'
+
+    post:
+      tags: [Users]
+      summary: Invite user
+      operationId: inviteUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+              required: [email, role]
+      responses:
+        '201':
+          description: User invited
+        '400':
+          description: Validation error
+
+  /users/{userId}:
+    get:
+      tags: [Users]
+      summary: Get user details
+      operationId: getUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: User details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+    patch:
+      tags: [Users]
+      summary: Update user
+      operationId: updateUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                status:
+                  type: string
+                  enum: [active, suspended]
+      responses:
+        '200':
+          description: User updated
+
+    delete:
+      tags: [Users]
+      summary: Delete user
+      operationId: deleteUser
+      parameters:
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        '200':
+          description: User deleted
+
+  /users/me:
+    get:
+      tags: [Users]
+      summary: Get own profile
+      operationId: getOwnProfile
+      responses:
+        '200':
+          description: Own profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+    patch:
+      tags: [Users]
+      summary: Update own profile
+      operationId: updateOwnProfile
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                avatar:
+                  type: string
+      responses:
+        '200':
+          description: Profile updated
+
+  /users/me/password:
+    patch:
+      tags: [Users]
+      summary: Change password
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                current_password:
+                  type: string
+                new_password:
+                  type: string
+                  minLength: 8
+              required: [current_password, new_password]
+      responses:
+        '200':
+          description: Password changed
+        '400':
+          description: Invalid current password
+
+  # ==========================================
+  # ROLE ENDPOINTS
+  # ==========================================
+
+  /roles:
+    get:
+      tags: [Roles]
+      summary: List all roles
+      description: List all roles (system + custom) for the tenant. System roles are predefined and cannot be modified.
+      operationId: listRoles
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [all, system, custom]
+            default: all
+          description: Filter by role type
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [hierarchy, name, members_count, created_at]
+            default: hierarchy
+      responses:
+        '200':
+          description: List of roles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Role'
+                  system_count:
+                    type: integer
+                  custom_count:
+                    type: integer
+
+    post:
+      tags: [Roles]
+      summary: Create custom role
+      description: Create a new custom role with specified permissions. Tenants can create unlimited custom roles.
+      operationId: createRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoleRequest'
+      responses:
+        '201':
+          description: Role created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          description: Validation error (duplicate name, invalid permissions)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /roles/{roleId}:
+    get:
+      tags: [Roles]
+      summary: Get role details
+      description: Get full role details including all permissions
+      operationId: getRole
+      parameters:
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Role details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+
+    patch:
+      tags: [Roles]
+      summary: Update custom role
+      description: Update a custom role's name, description, hierarchy, or permissions. System roles cannot be modified.
+      operationId: updateRole
+      parameters:
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRoleRequest'
+      responses:
+        '200':
+          description: Role updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+        '400':
+          description: Cannot modify system role
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    delete:
+      tags: [Roles]
+      summary: Delete custom role
+      description: Delete a custom role. System roles cannot be deleted. Roles with assigned members cannot be deleted.
+      operationId: deleteRole
+      parameters:
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Role deleted
+        '400':
+          description: Cannot delete system role or role with members
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                    enum: [system_role, has_members]
+                  message:
+                    type: string
+                  members_count:
+                    type: integer
+                    description: Number of members (if has_members error)
+
+  /roles/{roleId}/duplicate:
+    post:
+      tags: [Roles]
+      summary: Duplicate role
+      description: Create a new custom role based on an existing role's permissions. Useful for creating variations of system roles.
+      operationId: duplicateRole
+      parameters:
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DuplicateRoleRequest'
+      responses:
+        '201':
+          description: Role duplicated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+
+  /roles/{roleId}/permissions:
+    get:
+      tags: [Roles]
+      summary: Get role permissions
+      description: Get permissions for a specific role
+      operationId: getRolePermissions
+      parameters:
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Role permissions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role_id:
+                    type: string
+                  permissions:
+                    type: array
+                    items:
+                      type: string
+                  permissions_count:
+                    type: integer
+                  by_category:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
+
+    put:
+      tags: [Roles]
+      summary: Replace role permissions
+      description: Replace all permissions for a custom role
+      operationId: replaceRolePermissions
+      parameters:
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                permissions:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+              required: [permissions]
+      responses:
+        '200':
+          description: Permissions replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Role'
+
+  /roles/{roleId}/members:
+    get:
+      tags: [Roles]
+      summary: List role members
+      description: List all users assigned to this role
+      operationId: listRoleMembers
+      parameters:
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Role members
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/RoleMember'
+
+    post:
+      tags: [Roles]
+      summary: Bulk assign members to role
+      description: Assign multiple users to this role
+      operationId: bulkAssignRoleMembers
+      parameters:
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+              required: [user_ids]
+      responses:
+        '200':
+          description: Members assigned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  assigned:
+                    type: integer
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        user_id:
+                          type: string
+                        reason:
+                          type: string
+
+    delete:
+      tags: [Roles]
+      summary: Bulk remove members from role
+      description: Remove multiple users from this role
+      operationId: bulkRemoveRoleMembers
+      parameters:
+        - name: roleId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+              required: [user_ids]
+      responses:
+        '200':
+          description: Members removed
+
+  /roles/compare:
+    get:
+      tags: [Roles]
+      summary: Compare roles
+      description: Compare permissions between multiple roles
+      operationId: compareRoles
+      parameters:
+        - name: role_ids
+          in: query
+          required: true
+          schema:
+            type: array
+            items:
+              type: string
+              format: uuid
+            minItems: 2
+            maxItems: 5
+          style: form
+          explode: false
+      responses:
+        '200':
+          description: Role comparison
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        permissions_count:
+                          type: integer
+                  comparison:
+                    type: object
+                    properties:
+                      common:
+                        type: array
+                        items:
+                          type: string
+                        description: Permissions shared by all roles
+                      differences:
+                        type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                        description: Permissions unique to each role
+
+  /roles/export:
+    post:
+      tags: [Roles]
+      summary: Export role configurations
+      description: Export custom role configurations as JSON for backup or migration
+      operationId: exportRoles
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role_ids:
+                  type: array
+                  items:
+                    type: string
+                    format: uuid
+                  description: Specific roles to export (empty = all custom roles)
+                include_system:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Exported roles
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                  exported_at:
+                    type: string
+                    format: date-time
+                  roles:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        display_name:
+                          type: string
+                        description:
+                          type: string
+                        hierarchy:
+                          type: integer
+                        permissions:
+                          type: array
+                          items:
+                            type: string
+
+  /roles/import:
+    post:
+      tags: [Roles]
+      summary: Import role configurations
+      description: Import role configurations from JSON export
+      operationId: importRoles
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                roles:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      display_name:
+                        type: string
+                      description:
+                        type: string
+                      hierarchy:
+                        type: integer
+                      permissions:
+                        type: array
+                        items:
+                          type: string
+                merge_strategy:
+                  type: string
+                  enum: [skip_existing, replace_existing, rename_duplicates]
+                  default: skip_existing
+              required: [roles]
+      responses:
+        '200':
+          description: Import results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported:
+                    type: integer
+                  skipped:
+                    type: integer
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        reason:
+                          type: string
+
+  /permissions:
+    get:
+      tags: [Roles]
+      summary: List all available permissions
+      description: Get the full catalog of 114 available permissions with metadata
+      operationId: listPermissions
+      responses:
+        '200':
+          description: List of permissions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                    example: 114
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Permission'
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        count:
+                          type: integer
+                        permissions:
+                          type: array
+                          items:
+                            type: string
+
+  # ==========================================
+  # INFRASTRUCTURE ENDPOINTS
+  # ==========================================
+
+  /infrastructure/servers:
+    get:
+      tags: [Infrastructure]
+      summary: List servers
+      operationId: listServers
+      responses:
+        '200':
+          description: List of servers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Server'
+
+    post:
+      tags: [Infrastructure]
+      summary: Create server
+      operationId: createServer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                region:
+                  type: string
+                server_type:
+                  type: string
+                os:
+                  type: string
+              required: [name, region, server_type, os]
+      responses:
+        '201':
+          description: Server created
+
+  /infrastructure/servers/{serverId}:
+    get:
+      tags: [Infrastructure]
+      summary: Get server details
+      operationId: getServer
+      parameters:
+        - name: serverId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Server details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Server'
+
+    delete:
+      tags: [Infrastructure]
+      summary: Delete server
+      operationId: deleteServer
+      parameters:
+        - name: serverId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Server deleted
+
+  /infrastructure/servers/{serverId}/power:
+    post:
+      tags: [Infrastructure]
+      summary: Server power action
+      operationId: serverPowerAction
+      parameters:
+        - name: serverId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                action:
+                  type: string
+                  enum: [start, stop, reboot, rebuild]
+              required: [action]
+      responses:
+        '200':
+          description: Action initiated
+
+  /infrastructure/volumes:
+    get:
+      tags: [Infrastructure]
+      summary: List volumes
+      operationId: listVolumes
+      responses:
+        '200':
+          description: List of volumes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Volume'
+
+    post:
+      tags: [Infrastructure]
+      summary: Create volume
+      operationId: createVolume
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                size_gb:
+                  type: integer
+                  minimum: 10
+                  maximum: 10240
+                location:
+                  type: string
+                storage_type:
+                  type: string
+                  enum: [SSD, NVMe, HDD]
+              required: [name, size_gb, location, storage_type]
+      responses:
+        '201':
+          description: Volume created
+
+  /infrastructure/firewalls:
+    get:
+      tags: [Infrastructure]
+      summary: List firewalls
+      operationId: listFirewalls
+      responses:
+        '200':
+          description: List of firewalls
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Firewall'
+
+    post:
+      tags: [Infrastructure]
+      summary: Create firewall
+      operationId: createFirewall
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                inbound_rules:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/FirewallRule'
+                outbound_rules:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/FirewallRule'
+              required: [name]
+      responses:
+        '201':
+          description: Firewall created
+
+  # ==========================================
+  # WEBHOOK ENDPOINTS
+  # ==========================================
+
+  /webhooks:
+    get:
+      tags: [Webhooks]
+      summary: List webhooks
+      operationId: listWebhooks
+      responses:
+        '200':
+          description: List of webhooks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Webhook'
+
+    post:
+      tags: [Webhooks]
+      summary: Create webhook
+      operationId: createWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+                  format: uri
+                events:
+                  type: array
+                  items:
+                    type: string
+              required: [name, url, events]
+      responses:
+        '201':
+          description: Webhook created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhook:
+                    $ref: '#/components/schemas/Webhook'
+                  secret:
+                    type: string
+                    description: HMAC signing secret (shown once)
+
+  /webhooks/{webhookId}:
+    patch:
+      tags: [Webhooks]
+      summary: Update webhook
+      operationId: updateWebhook
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+                events:
+                  type: array
+                  items:
+                    type: string
+                status:
+                  type: string
+                  enum: [active, paused]
+      responses:
+        '200':
+          description: Webhook updated
+
+    delete:
+      tags: [Webhooks]
+      summary: Delete webhook
+      operationId: deleteWebhook
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Webhook deleted
+
+  /webhooks/{webhookId}/regenerate-secret:
+    post:
+      tags: [Webhooks]
+      summary: Regenerate webhook secret
+      operationId: regenerateWebhookSecret
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Secret regenerated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    type: string
+
+  /webhooks/{webhookId}/test:
+    post:
+      tags: [Webhooks]
+      summary: Test webhook
+      operationId: testWebhook
+      parameters:
+        - name: webhookId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Test sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  response_code:
+                    type: integer
+                  response_time_ms:
+                    type: integer
+
+  # ==========================================
+  # SECRETS & ENVIRONMENT VARIABLES ENDPOINTS
+  # ==========================================
+
+  /environment-variables:
+    get:
+      tags: [Secrets]
+      summary: List environment variables
+      description: |
+        Returns all environment variables accessible to the current tenant.
+        Values are NOT returned - only metadata (prefix/suffix for identification).
+      operationId: listEnvironmentVariables
+      parameters:
+        - name: scope
+          in: query
+          schema:
+            type: string
+            enum: [workspace, project, runtime]
+        - name: project_id
+          in: query
+          description: Required if scope=project
+          schema:
+            type: string
+            format: uuid
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of environment variables (metadata only)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EnvironmentVariable'
+                  total:
+                    type: integer
+
+    post:
+      tags: [Secrets]
+      summary: Create environment variable
+      description: |
+        Creates a new environment variable. The value will be encrypted immediately.
+        **IMPORTANT**: The plaintext value is returned ONLY in this response (one-time display).
+      operationId: createEnvironmentVariable
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  pattern: '^[A-Z_][A-Z0-9_]*$'
+                  minLength: 3
+                  maxLength: 64
+                value:
+                  type: string
+                  description: Will be encrypted (shown once in response)
+                scope:
+                  type: string
+                  enum: [workspace, project, runtime]
+                project_id:
+                  type: string
+                  format: uuid
+                  description: Required if scope=project
+                type:
+                  type: string
+                  enum: [text, secret, multiline, url, number, json]
+                  default: secret
+                service:
+                  type: string
+                  default: custom
+                description:
+                  type: string
+              required: [name, value, scope, type]
+      responses:
+        '201':
+          description: Variable created (includes one-time plaintext value)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentVariableCreated'
+        '400':
+          description: Invalid input (reserved prefix, duplicate name, etc.)
+
+  /environment-variables/from-template:
+    post:
+      tags: [Secrets]
+      summary: Create variable from template
+      description: |
+        Creates environment variable(s) using a predefined template.
+        Returns credentials for one-time display.
+      operationId: createFromTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                template_id:
+                  type: string
+                variable_name:
+                  type: string
+                description:
+                  type: string
+                scope:
+                  type: string
+                  enum: [workspace, project, runtime]
+                project_id:
+                  type: string
+                  format: uuid
+                credentials:
+                  type: object
+                  additionalProperties:
+                    type: string
+                  description: Template credential field values
+                additional_fields:
+                  type: object
+                  additionalProperties:
+                    type: string
+              required: [template_id, variable_name, scope, credentials]
+      responses:
+        '201':
+          description: Variable(s) created from template
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  name:
+                    type: string
+                  credentials:
+                    type: object
+                    additionalProperties:
+                      type: string
+                    description: ONE-TIME DISPLAY of credential values
+                  created_at:
+                    type: string
+                    format: date-time
+
+  /environment-variables/import:
+    post:
+      tags: [Secrets]
+      summary: Import environment variables
+      description: Import variables from .env, .json, or .csv file
+      operationId: importEnvironmentVariables
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+                scope:
+                  type: string
+                  enum: [workspace, project, runtime]
+                overwrite:
+                  type: boolean
+                  default: false
+              required: [file, scope]
+      responses:
+        '200':
+          description: Import results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported:
+                    type: integer
+                  skipped:
+                    type: integer
+                  errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        line:
+                          type: integer
+                        error:
+                          type: string
+
+  /environment-variables/export:
+    post:
+      tags: [Secrets]
+      summary: Export environment variables
+      description: |
+        Export all environment variables. **Requires MFA verification**.
+        Returns a signed download URL that expires in 5 minutes.
+      operationId: exportEnvironmentVariables
+      parameters:
+        - name: X-MFA-Code
+          in: header
+          required: true
+          schema:
+            type: string
+            pattern: '^\d{6}$'
+          description: 6-digit MFA code (required for export)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                format:
+                  type: string
+                  enum: [json, env, csv]
+                scope:
+                  type: string
+                  enum: [workspace, project, runtime]
+                include_values:
+                  type: boolean
+                  description: Must be explicitly true to include decrypted values
+              required: [format, include_values]
+      responses:
+        '200':
+          description: Export download URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  download_url:
+                    type: string
+                    format: uri
+                    description: Signed URL, expires in 5 minutes
+                  expires_at:
+                    type: string
+                    format: date-time
+        '403':
+          description: MFA verification required or failed
+
+  /environment-variables/{id}:
+    get:
+      tags: [Secrets]
+      summary: Get environment variable
+      description: Returns variable metadata (no plaintext value)
+      operationId: getEnvironmentVariable
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Environment variable metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentVariable'
+        '404':
+          description: Variable not found
+
+    patch:
+      tags: [Secrets]
+      summary: Update environment variable
+      description: |
+        Update variable. If value is changed, new value shown once in response.
+      operationId: updateEnvironmentVariable
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                value:
+                  type: string
+                  description: New value (will be encrypted)
+                scope:
+                  type: string
+                  enum: [workspace, project, runtime]
+                description:
+                  type: string
+      responses:
+        '200':
+          description: Variable updated (includes one-time value if changed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentVariableCreated'
+
+    delete:
+      tags: [Secrets]
+      summary: Delete environment variable
+      operationId: deleteEnvironmentVariable
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Variable deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  deleted_id:
+                    type: string
+                    format: uuid
+
+  /environment-variables/{id}/rotate:
+    post:
+      tags: [Secrets]
+      summary: Rotate environment variable
+      description: Generate new value and rotate the credential
+      operationId: rotateEnvironmentVariable
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Variable rotated (one-time display of new value)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  new_value:
+                    type: string
+                    description: ONE-TIME DISPLAY
+                  value_prefix:
+                    type: string
+                  value_suffix:
+                    type: string
+                  rotated_at:
+                    type: string
+                    format: date-time
+                  rotated_by:
+                    type: string
+                    format: uuid
+
+  # ==========================================
+  # API KEYS ENDPOINTS
+  # ==========================================
+
+  /api-keys:
+    get:
+      tags: [Secrets]
+      summary: List API keys
+      description: Returns all API keys for the current tenant (prefix only)
+      operationId: listApiKeys
+      responses:
+        '200':
+          description: List of API keys
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ApiKey'
+
+    post:
+      tags: [Secrets]
+      summary: Create API key
+      description: |
+        Creates a new API key. **IMPORTANT**: The full key is returned ONLY in this response.
+      operationId: createApiKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 64
+                permissions:
+                  type: array
+                  items:
+                    type: string
+                  description: "Permissions: servers:read, workflows:execute, etc."
+                expires_in:
+                  type: integer
+                  description: Expiration in days (null for never)
+              required: [name, permissions]
+      responses:
+        '201':
+          description: API key created (includes one-time full key)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyCreated'
+
+  /api-keys/{id}:
+    get:
+      tags: [Secrets]
+      summary: Get API key details
+      operationId: getApiKey
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: API key details (no full key)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKey'
+
+    delete:
+      tags: [Secrets]
+      summary: Revoke API key
+      operationId: revokeApiKey
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: API key revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    format: uuid
+                  status:
+                    type: string
+                    enum: [revoked]
+                  revoked_at:
+                    type: string
+                    format: date-time
+
+  /api-keys/{id}/regenerate:
+    post:
+      tags: [Secrets]
+      summary: Regenerate API key
+      description: Invalidates current key and generates new one
+      operationId: regenerateApiKey
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: New API key generated (one-time display)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyCreated'
+
+  # ==========================================
+  # TEMPLATES ENDPOINTS
+  # ==========================================
+
+  /templates:
+    get:
+      tags: [Secrets]
+      summary: List environment variable templates
+      description: Returns all available templates (102+ services)
+      operationId: listTemplates
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [llm, mcp, cloud, collaboration, development, payments, support, crm, project, storage, database, monitoring, authentication, social, marketing, infrastructure]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Template'
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        count:
+                          type: integer
+
+  /templates/{id}:
+    get:
+      tags: [Secrets]
+      summary: Get template details
+      description: Returns template configuration including credential fields
+      operationId: getTemplate
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Template configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplateConfig'
+
+  # ==========================================
+  # BILLING ENDPOINTS
+  # ==========================================
+
+  /billing/subscription:
+    get:
+      tags: [Billing]
+      summary: Get current subscription
+      operationId: getSubscription
+      responses:
+        '200':
+          description: Subscription details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+
+    patch:
+      tags: [Billing]
+      summary: Update subscription
+      description: Update billing cycle or other subscription settings
+      operationId: updateSubscription
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                billing_cycle:
+                  type: string
+                  enum: [monthly, annual]
+      responses:
+        '200':
+          description: Subscription updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+
+  /billing/subscription/upgrade:
+    post:
+      tags: [Billing]
+      summary: Upgrade subscription plan
+      description: Upgrade to a higher tier plan
+      operationId: upgradeSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plan:
+                  type: string
+                  enum: [basic, business, enterprise]
+                billing_cycle:
+                  type: string
+                  enum: [monthly, annual]
+                license_count:
+                  type: integer
+                  minimum: 1
+                payment_method_id:
+                  type: string
+                  format: uuid
+              required: [plan]
+      responses:
+        '200':
+          description: Subscription upgraded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscription:
+                    $ref: '#/components/schemas/Subscription'
+                  prorated_amount:
+                    type: number
+                    description: Amount charged/credited for proration
+                  effective_date:
+                    type: string
+                    format: date
+
+  /billing/subscription/downgrade:
+    post:
+      tags: [Billing]
+      summary: Downgrade subscription plan
+      description: Schedule downgrade to a lower tier plan (effective at period end)
+      operationId: downgradeSubscription
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plan:
+                  type: string
+                  enum: [free, basic, business]
+                reason:
+                  type: string
+              required: [plan]
+      responses:
+        '200':
+          description: Downgrade scheduled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  current_plan:
+                    type: string
+                  new_plan:
+                    type: string
+                  effective_date:
+                    type: string
+                    format: date
+                  features_lost:
+                    type: array
+                    items:
+                      type: string
+
+  /billing/subscription/cancel:
+    post:
+      tags: [Billing]
+      summary: Cancel subscription
+      description: Schedule subscription cancellation (requires MFA for critical action)
+      operationId: cancelSubscription
+      x-requires-mfa: true
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                feedback:
+                  type: string
+                immediate:
+                  type: boolean
+                  default: false
+                  description: If true, cancel immediately. Otherwise, at period end.
+              required: [reason]
+      responses:
+        '200':
+          description: Cancellation scheduled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancelled:
+                    type: boolean
+                  effective_date:
+                    type: string
+                    format: date
+                  data_retention_until:
+                    type: string
+                    format: date
+
+  /billing/subscription/reactivate:
+    post:
+      tags: [Billing]
+      summary: Reactivate cancelled subscription
+      description: Reactivate a subscription scheduled for cancellation
+      operationId: reactivateSubscription
+      responses:
+        '200':
+          description: Subscription reactivated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Subscription'
+
+  /billing/payment-methods:
+    get:
+      tags: [Billing]
+      summary: List payment methods
+      operationId: listPaymentMethods
+      responses:
+        '200':
+          description: List of payment methods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PaymentMethod'
+
+    post:
+      tags: [Billing]
+      summary: Add payment method
+      operationId: addPaymentMethod
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [card, paypal, revolut]
+                token:
+                  type: string
+                  description: Payment processor token (Stripe token for cards)
+                set_default:
+                  type: boolean
+                  default: false
+              required: [type, token]
+      responses:
+        '201':
+          description: Payment method added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentMethod'
+
+  /billing/payment-methods/{methodId}:
+    get:
+      tags: [Billing]
+      summary: Get payment method details
+      operationId: getPaymentMethod
+      parameters:
+        - name: methodId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Payment method details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentMethod'
+
+    delete:
+      tags: [Billing]
+      summary: Remove payment method
+      operationId: removePaymentMethod
+      parameters:
+        - name: methodId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Payment method removed
+        '400':
+          description: Cannot remove default payment method with active subscription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /billing/payment-methods/{methodId}/default:
+    patch:
+      tags: [Billing]
+      summary: Set default payment method
+      operationId: setDefaultPaymentMethod
+      parameters:
+        - name: methodId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Default payment method updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentMethod'
+
+  /billing/invoices:
+    get:
+      tags: [Billing]
+      summary: List invoices
+      operationId: listInvoices
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [paid, pending, failed]
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of invoices
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/Invoice'
+
+  /billing/invoices/{invoiceId}:
+    get:
+      tags: [Billing]
+      summary: Get invoice details
+      operationId: getInvoice
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Invoice details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Invoice'
+
+  /billing/invoices/{invoiceId}/download:
+    get:
+      tags: [Billing]
+      summary: Download invoice PDF
+      operationId: downloadInvoice
+      parameters:
+        - name: invoiceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Invoice PDF
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        '302':
+          description: Redirect to download URL
+
+  /billing/invoices/export:
+    post:
+      tags: [Billing]
+      summary: Export invoices
+      description: Export all invoices for a date range
+      operationId: exportInvoices
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                start_date:
+                  type: string
+                  format: date
+                end_date:
+                  type: string
+                  format: date
+                format:
+                  type: string
+                  enum: [pdf, csv, zip]
+                  default: zip
+              required: [start_date, end_date]
+      responses:
+        '202':
+          description: Export initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export_id:
+                    type: string
+                  download_url:
+                    type: string
+                    format: uri
+                  expires_at:
+                    type: string
+                    format: date-time
+
+  /billing/tokens/usage:
+    get:
+      tags: [Billing]
+      summary: Get token usage
+      description: Get current token usage and allocation
+      operationId: getTokenUsage
+      responses:
+        '200':
+          description: Token usage details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenUsage'
+
+  /billing/tokens/packages:
+    get:
+      tags: [Billing]
+      summary: List token packages
+      description: Get available token packages for purchase
+      operationId: listTokenPackages
+      responses:
+        '200':
+          description: Available token packages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TokenPackage'
+
+  /billing/tokens/purchase:
+    post:
+      tags: [Billing]
+      summary: Purchase tokens
+      description: Purchase a token package (one-time, no expiration)
+      operationId: purchaseTokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                package_id:
+                  type: string
+                payment_method_id:
+                  type: string
+                  format: uuid
+              required: [package_id]
+      responses:
+        '200':
+          description: Tokens purchased
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  purchase:
+                    $ref: '#/components/schemas/TokenPurchase'
+                  new_balance:
+                    type: integer
+        '402':
+          description: Payment required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckoutSession'
+
+  /billing/tokens/history:
+    get:
+      tags: [Billing]
+      summary: Get token purchase history
+      operationId: getTokenHistory
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Token purchase history
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TokenPurchase'
+
+  /billing/licenses:
+    get:
+      tags: [Billing]
+      summary: Get license allocation
+      description: Get license allocation by tier
+      operationId: getLicenseAllocation
+      responses:
+        '200':
+          description: License allocation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LicenseAllocation'
+
+  /billing/licenses/purchase:
+    post:
+      tags: [Billing]
+      summary: Purchase licenses
+      description: Purchase additional licenses
+      operationId: purchaseLicenses
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tier:
+                  type: string
+                  enum: [basic, business]
+                quantity:
+                  type: integer
+                  minimum: 1
+                payment_method_id:
+                  type: string
+                  format: uuid
+              required: [tier, quantity]
+      responses:
+        '200':
+          description: Licenses purchased
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  licenses_added:
+                    type: integer
+                  new_total:
+                    type: integer
+                  monthly_cost_increase:
+                    type: number
+
+  /billing/licenses/{licenseId}/assign:
+    patch:
+      tags: [Billing]
+      summary: Assign license to user
+      operationId: assignLicense
+      parameters:
+        - name: licenseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                user_id:
+                  type: string
+                  format: uuid
+              required: [user_id]
+      responses:
+        '200':
+          description: License assigned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/License'
+
+  /billing/licenses/{licenseId}:
+    delete:
+      tags: [Billing]
+      summary: Remove license
+      description: Remove/unassign a license
+      operationId: removeLicense
+      parameters:
+        - name: licenseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: License removed
+
+  /billing/info:
+    get:
+      tags: [Billing]
+      summary: Get billing contact info
+      operationId: getBillingInfo
+      responses:
+        '200':
+          description: Billing contact information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingInfo'
+
+    patch:
+      tags: [Billing]
+      summary: Update billing contact info
+      operationId: updateBillingInfo
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillingInfo'
+      responses:
+        '200':
+          description: Billing info updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingInfo'
+
+  /billing/address:
+    get:
+      tags: [Billing]
+      summary: Get billing address
+      operationId: getBillingAddress
+      responses:
+        '200':
+          description: Billing address
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingAddress'
+
+    patch:
+      tags: [Billing]
+      summary: Update billing address
+      operationId: updateBillingAddress
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillingAddress'
+      responses:
+        '200':
+          description: Billing address updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BillingAddress'
+
+  /billing/checkout/process:
+    post:
+      tags: [Billing]
+      summary: Process checkout
+      description: Process a checkout session
+      operationId: processCheckout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [subscription, tokens, licenses]
+                payment_method_id:
+                  type: string
+                  format: uuid
+                items:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      product_id:
+                        type: string
+                      quantity:
+                        type: integer
+              required: [type, payment_method_id]
+      responses:
+        '200':
+          description: Checkout processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  transaction_id:
+                    type: string
+                  amount:
+                    type: number
+        '402':
+          description: 3D Secure required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreeDSecureChallenge'
+
+  /billing/checkout/3d-secure:
+    post:
+      tags: [Billing]
+      summary: Initiate 3D Secure verification
+      operationId: initiate3DSecure
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payment_method_id:
+                  type: string
+                  format: uuid
+                amount:
+                  type: number
+                return_url:
+                  type: string
+                  format: uri
+              required: [payment_method_id, amount, return_url]
+      responses:
+        '200':
+          description: 3D Secure challenge initiated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ThreeDSecureChallenge'
+
+  /billing/checkout/3d-secure/{challengeId}/verify:
+    post:
+      tags: [Billing]
+      summary: Verify 3D Secure code
+      operationId: verify3DSecure
+      parameters:
+        - name: challengeId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+              required: [code]
+      responses:
+        '200':
+          description: Verification successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  verified:
+                    type: boolean
+                  transaction_id:
+                    type: string
+
+  /billing/checkout/paypal:
+    post:
+      tags: [Billing]
+      summary: Create PayPal checkout
+      operationId: createPayPalCheckout
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type:
+                  type: string
+                  enum: [subscription, tokens]
+                items:
+                  type: array
+                  items:
+                    type: object
+                return_url:
+                  type: string
+                  format: uri
+                cancel_url:
+                  type: string
+                  format: uri
+              required: [type, return_url, cancel_url]
+      responses:
+        '200':
+          description: PayPal checkout created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checkout_id:
+                    type: string
+                  approval_url:
+                    type: string
+                    format: uri
+                    description: Redirect user to this URL
+
+  /billing/checkout/paypal/{checkoutId}/capture:
+    post:
+      tags: [Billing]
+      summary: Capture PayPal payment
+      description: Called after user approves PayPal payment
+      operationId: capturePayPalPayment
+      parameters:
+        - name: checkoutId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payment captured
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  transaction_id:
+                    type: string
+
+  /billing/team:
+    get:
+      tags: [Billing]
+      summary: Get team members with license info
+      operationId: getBillingTeam
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Team members with license information
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TeamMember'
+
+  /billing/invites:
+    get:
+      tags: [Billing]
+      summary: Get pending invites
+      operationId: getPendingInvites
+      responses:
+        '200':
+          description: Pending invites
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PendingInvite'
+
+    post:
+      tags: [Billing]
+      summary: Create team invite
+      operationId: createTeamInvite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                invites:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      email:
+                        type: string
+                        format: email
+                      role:
+                        type: string
+                      license_tier:
+                        type: string
+                        enum: [free, basic, business]
+                    required: [email, role]
+              required: [invites]
+      responses:
+        '201':
+          description: Invites created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sent:
+                    type: integer
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        email:
+                          type: string
+                        reason:
+                          type: string
+
+  /billing/invites/{inviteId}:
+    delete:
+      tags: [Billing]
+      summary: Cancel invite
+      operationId: cancelInvite
+      parameters:
+        - name: inviteId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Invite cancelled
+
+  /billing/invites/{inviteId}/resend:
+    post:
+      tags: [Billing]
+      summary: Resend invite
+      operationId: resendInvite
+      parameters:
+        - name: inviteId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Invite resent
+
+  /billing/usage:
+    get:
+      tags: [Billing]
+      summary: Get usage summary
+      operationId: getUsage
+      responses:
+        '200':
+          description: Usage summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  period:
+                    type: object
+                    properties:
+                      start:
+                        type: string
+                        format: date
+                      end:
+                        type: string
+                        format: date
+                  usage:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        used:
+                          type: integer
+                        limit:
+                          type: integer
+                        unit:
+                          type: string
+                  trends:
+                    type: object
+                    properties:
+                      avg_daily_tokens:
+                        type: number
+                      active_nodes:
+                        type: integer
+                      executions_30d:
+                        type: integer
+
+  # ==========================================
+  # COMPLIANCE ENDPOINTS
+  # ==========================================
+
+  /compliance/consent:
+    get:
+      tags: [Compliance]
+      summary: Get user consents
+      operationId: getConsents
+      responses:
+        '200':
+          description: User consents
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  consents:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ConsentRecord'
+
+    post:
+      tags: [Compliance]
+      summary: Record consent
+      operationId: recordConsent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                consents:
+                  type: object
+                  additionalProperties:
+                    type: boolean
+                version:
+                  type: string
+              required: [consents, version]
+      responses:
+        '201':
+          description: Consent recorded
+
+  /compliance/consent/{consentId}/revoke:
+    post:
+      tags: [Compliance]
+      summary: Revoke consent
+      operationId: revokeConsent
+      parameters:
+        - name: consentId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Consent revoked
+
+  /compliance/data-export:
+    post:
+      tags: [Compliance]
+      summary: Request data export
+      description: GDPR Article 15 - Right of Access
+      operationId: requestDataExport
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                format:
+                  type: string
+                  enum: [json, csv, pdf]
+                  default: json
+                include:
+                  type: array
+                  items:
+                    type: string
+                    enum: [profile, activity, audit_logs, consents, settings]
+      responses:
+        '202':
+          description: Export request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataExportRequest'
+
+  /compliance/data-export/{requestId}:
+    get:
+      tags: [Compliance]
+      summary: Get export status
+      operationId: getDataExportStatus
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Export status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataExportRequest'
+
+  /compliance/data-deletion:
+    post:
+      tags: [Compliance]
+      summary: Request data deletion
+      description: GDPR Article 17 - Right to Erasure
+      operationId: requestDataDeletion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                verification_token:
+                  type: string
+                reason:
+                  type: string
+              required: [verification_token]
+      responses:
+        '202':
+          description: Deletion request accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataDeletionRequest'
+
+  /compliance/data-deletion/{requestId}/cancel:
+    post:
+      tags: [Compliance]
+      summary: Cancel deletion request
+      operationId: cancelDataDeletion
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Deletion cancelled
+
+  /compliance/ccpa/do-not-sell:
+    post:
+      tags: [Compliance]
+      summary: Toggle Do Not Sell
+      description: CCPA - Opt-out of data sale
+      operationId: toggleDoNotSell
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                do_not_sell:
+                  type: boolean
+              required: [do_not_sell]
+      responses:
+        '200':
+          description: Preference updated
+
+  /compliance/privacy-settings:
+    get:
+      tags: [Compliance]
+      summary: Get privacy settings
+      operationId: getPrivacySettings
+      responses:
+        '200':
+          description: Privacy settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  do_not_sell:
+                    type: boolean
+                  do_not_share:
+                    type: boolean
+                  analytics:
+                    type: boolean
+                  marketing:
+                    type: boolean
+
+    patch:
+      tags: [Compliance]
+      summary: Update privacy settings
+      operationId: updatePrivacySettings
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                do_not_sell:
+                  type: boolean
+                do_not_share:
+                  type: boolean
+                analytics:
+                  type: boolean
+                marketing:
+                  type: boolean
+      responses:
+        '200':
+          description: Settings updated
+
+  # ==========================================
+  # AUDIT ENDPOINTS
+  # ==========================================
+
+  /audit-logs:
+    get:
+      tags: [Audit]
+      summary: Query audit logs
+      operationId: queryAuditLogs
+      parameters:
+        - name: event_type
+          in: query
+          schema:
+            type: string
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: start_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Audit logs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/AuditLog'
+
+    post:
+      tags: [Audit]
+      summary: Create audit log
+      operationId: createAuditLog
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                event_type:
+                  type: string
+                action:
+                  type: string
+                description:
+                  type: string
+                status:
+                  type: string
+                  enum: [success, failure, warning]
+                resource_type:
+                  type: string
+                resource_id:
+                  type: string
+                purpose:
+                  type: string
+                  minLength: 20
+                legal_basis:
+                  type: string
+                metadata:
+                  type: object
+              required: [event_type, action, description, status, purpose, legal_basis]
+      responses:
+        '201':
+          description: Audit log created
+
+  /audit-logs/{logId}:
+    get:
+      tags: [Audit]
+      summary: Get audit log details
+      operationId: getAuditLog
+      parameters:
+        - name: logId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Audit log details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLog'
+
+  /audit-logs/{logId}/verify:
+    post:
+      tags: [Audit]
+      summary: Verify audit log integrity
+      operationId: verifyAuditLog
+      parameters:
+        - name: logId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Integrity verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid:
+                    type: boolean
+                  checks:
+                    type: object
+                    properties:
+                      hash_valid:
+                        type: boolean
+                      signature_valid:
+                        type: boolean
+                      chain_valid:
+                        type: boolean
+                  issues:
+                    type: array
+                    items:
+                      type: string
+
+  /audit-logs/export:
+    post:
+      tags: [Audit]
+      summary: Export audit logs
+      operationId: exportAuditLogs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                start_date:
+                  type: string
+                  format: date
+                end_date:
+                  type: string
+                  format: date
+                format:
+                  type: string
+                  enum: [csv, json]
+              required: [start_date, end_date]
+      responses:
+        '202':
+          description: Export initiated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  export_id:
+                    type: string
+                  download_url:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+
+  # ==========================================
+  # WORKFLOW ENDPOINTS
+  # ==========================================
+
+  /workflows:
+    get:
+      tags: [Node]
+      summary: List workflows
+      description: Returns all workflows for the current tenant
+      operationId: listWorkflows
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, active, paused, archived]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: List of workflows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Workflow'
+                  total:
+                    type: integer
+
+    post:
+      tags: [Node]
+      summary: Create workflow
+      description: Create a new workflow with nodes and edges
+      operationId: createWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                description:
+                  type: string
+                nodes:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/WorkflowNode'
+                edges:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/WorkflowEdge'
+              required: [name]
+      responses:
+        '201':
+          description: Workflow created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workflow'
+
+  /workflows/generate:
+    post:
+      tags: [Node]
+      summary: Generate workflow from prompt
+      description: Use AI to generate a workflow from natural language description
+      operationId: generateWorkflow
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prompt:
+                  type: string
+                  description: Natural language description of desired workflow
+                context:
+                  type: object
+                  description: Additional context for generation
+              required: [prompt]
+      responses:
+        '200':
+          description: Generated workflow
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workflow'
+
+  /workflows/{id}:
+    get:
+      tags: [Node]
+      summary: Get workflow
+      operationId: getWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Workflow details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workflow'
+
+    patch:
+      tags: [Node]
+      summary: Update workflow
+      operationId: updateWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                nodes:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/WorkflowNode'
+                edges:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/WorkflowEdge'
+                status:
+                  type: string
+                  enum: [draft, active, paused, archived]
+      responses:
+        '200':
+          description: Workflow updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workflow'
+
+    delete:
+      tags: [Node]
+      summary: Delete workflow
+      operationId: deleteWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Workflow deleted
+
+  /workflows/{id}/duplicate:
+    post:
+      tags: [Node]
+      summary: Duplicate workflow
+      operationId: duplicateWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '201':
+          description: Workflow duplicated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Workflow'
+
+  /workflows/{id}/execute:
+    post:
+      tags: [Node]
+      summary: Execute workflow
+      description: Trigger workflow execution with optional input
+      operationId: executeWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+                  description: Input data for the workflow
+                mode:
+                  type: string
+                  enum: [sync, async]
+                  default: async
+      responses:
+        '200':
+          description: Execution started/completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowExecution'
+
+  /workflows/{id}/executions:
+    get:
+      tags: [Node]
+      summary: List workflow executions
+      operationId: listWorkflowExecutions
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, cancelled]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: List of executions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WorkflowExecution'
+                  total:
+                    type: integer
+
+  /workflows/{id}/executions/{executionId}:
+    get:
+      tags: [Node]
+      summary: Get execution details
+      operationId: getWorkflowExecution
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Execution details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkflowExecution'
+
+  /workflows/{id}/executions/{executionId}/cancel:
+    post:
+      tags: [Node]
+      summary: Cancel execution
+      operationId: cancelWorkflowExecution
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: executionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Execution cancelled
+
+  /workflows/{id}/optimize:
+    post:
+      tags: [Node]
+      summary: Optimize workflow
+      description: Use AI to optimize workflow for specified goal
+      operationId: optimizeWorkflow
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                goal:
+                  type: string
+                  enum: [performance, cost, reliability]
+      responses:
+        '200':
+          description: Optimization suggestions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  suggestions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type:
+                          type: string
+                        description:
+                          type: string
+                        impact:
+                          type: string
+                  optimized_workflow:
+                    $ref: '#/components/schemas/Workflow'
+
+  # ==========================================
+  # NODE ENDPOINTS
+  # ==========================================
+
+  /nodes/types:
+    get:
+      tags: [Node]
+      summary: List available node types
+      description: Returns all available node types (20 types)
+      operationId: listNodeTypes
+      responses:
+        '200':
+          description: List of node types
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NodeType'
+
+  /nodes/types/{type}:
+    get:
+      tags: [Node]
+      summary: Get node type details
+      description: Returns configuration schema for a node type
+      operationId: getNodeType
+      parameters:
+        - name: type
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Node type details with config schema
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeTypeConfig'
+
+  /nodes/templates:
+    get:
+      tags: [Node]
+      summary: List node templates
+      description: Returns pre-built node templates
+      operationId: listNodeTemplates
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of node templates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/NodeTemplate'
+
+  /nodes/generate:
+    post:
+      tags: [Node]
+      summary: Generate node configuration
+      description: Use AI to generate node configuration from description
+      operationId: generateNode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nodeType:
+                  type: string
+                description:
+                  type: string
+              required: [nodeType, description]
+      responses:
+        '200':
+          description: Generated node configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  config:
+                    type: object
+
+  # ==========================================
+  # DOCUMENTATION ENDPOINTS
+  # ==========================================
+
+  /documentation:
+    get:
+      tags: [Node]
+      summary: List documentation pages
+      description: Returns all documentation pages (40 pages)
+      operationId: listDocumentation
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of documentation pages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DocumentationPage'
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                        count:
+                          type: integer
+
+  /documentation/{slug}:
+    get:
+      tags: [Node]
+      summary: Get documentation page
+      operationId: getDocumentationPage
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Documentation page content
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentationPage'
+
+  /public/documentation:
+    get:
+      tags: [Node]
+      summary: List public documentation
+      description: Public endpoint - no auth required
+      operationId: listPublicDocumentation
+      security: []
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Public documentation list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DocumentationPage'
+
+  /public/documentation/{slug}:
+    get:
+      tags: [Node]
+      summary: Get public documentation page
+      security: []
+      operationId: getPublicDocumentationPage
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Public documentation page
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentationPage'
+
+  # ==========================================
+  # ADMIN ENDPOINTS
+  # ==========================================
+
+  /admin/auth/login:
+    post:
+      tags: [Admin]
+      summary: Admin login
+      description: Authenticate as global admin
+      operationId: adminLogin
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+              required: [email, password]
+      responses:
+        '200':
+          description: Admin login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  is_global_admin:
+                    type: boolean
+
+  /admin/tenants:
+    get:
+      tags: [Admin]
+      summary: List all tenants
+      operationId: adminListTenants
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, suspended, trial]
+        - name: page
+          in: query
+          schema:
+            type: integer
+        - name: per_page
+          in: query
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: List of all tenants
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/PaginatedResponse'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: '#/components/schemas/TenantConfig'
+
+    post:
+      tags: [Admin]
+      summary: Create tenant
+      operationId: adminCreateTenant
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                slug:
+                  type: string
+                plan:
+                  type: string
+                  enum: [free, starter, professional, enterprise]
+                owner_email:
+                  type: string
+                  format: email
+              required: [name, slug, plan, owner_email]
+      responses:
+        '201':
+          description: Tenant created
+
+  /admin/tenants/{tenantId}:
+    get:
+      tags: [Admin]
+      summary: Get tenant details
+      operationId: adminGetTenant
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Tenant details
+
+    patch:
+      tags: [Admin]
+      summary: Update tenant
+      operationId: adminUpdateTenant
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [active, suspended]
+                plan:
+                  type: string
+                limits:
+                  type: object
+      responses:
+        '200':
+          description: Tenant updated
+
+    delete:
+      tags: [Admin]
+      summary: Delete tenant
+      operationId: adminDeleteTenant
+      parameters:
+        - name: tenantId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Tenant deleted
+
+  /admin/system/stats:
+    get:
+      tags: [Admin]
+      summary: Get system statistics
+      operationId: adminGetSystemStats
+      responses:
+        '200':
+          description: System statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_tenants:
+                    type: integer
+                  active_tenants:
+                    type: integer
+                  total_users:
+                    type: integer
+                  total_servers:
+                    type: integer
+                  total_workflows:
+                    type: integer
+                  executions_today:
+                    type: integer
+
+  /admin/audit-logs:
+    get:
+      tags: [Admin]
+      summary: Query global audit logs
+      operationId: adminQueryAuditLogs
+      parameters:
+        - name: tenant_id
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: event_type
+          in: query
+          schema:
+            type: string
+        - name: severity
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Global audit logs
+
+  # ==========================================
+  # NODE SDK ENDPOINTS
+  # ==========================================
+
+  /v1/node:
+    get:
+      tags: [Node]
+      summary: Get node health
+      operationId: getNodeHealth
+      responses:
+        '200':
+          description: Node health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  node_type:
+                    type: string
+                  node_name:
+                    type: string
+                  vendor:
+                    type: string
+                  status:
+                    type: string
+                    enum: [ok, degraded, down]
+                  uptime_seconds:
+                    type: integer
+
+  /v1/node/capabilities:
+    get:
+      tags: [Node]
+      summary: Get node capabilities
+      operationId: getNodeCapabilities
+      responses:
+        '200':
+          description: Node capabilities
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  modes:
+                    type: object
+                    properties:
+                      async:
+                        type: boolean
+                      sync:
+                        type: boolean
+                      streaming:
+                        type: boolean
+                  limits:
+                    type: object
+                  features:
+                    type: object
+
+  /v1/node/schemas:
+    get:
+      tags: [Node]
+      summary: Get node schemas
+      operationId: getNodeSchemas
+      responses:
+        '200':
+          description: Node I/O schemas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  input:
+                    type: object
+                  output:
+                    type: object
+                  config:
+                    type: object
+
+  /v1/runs:
+    post:
+      tags: [Node]
+      summary: Create run
+      operationId: createRun
+      parameters:
+        - name: X-Idempotency-Key
+          in: header
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+                config:
+                  type: object
+              required: [input]
+      responses:
+        '201':
+          description: Run created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  status:
+                    type: string
+                    enum: [queued, running, succeeded, failed, cancelled]
+
+  /v1/runs/{runId}:
+    get:
+      tags: [Node]
+      summary: Get run status
+      operationId: getRunStatus
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Run status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: string
+                  status:
+                    type: string
+                  output:
+                    type: object
+                  error:
+                    type: object
+
+  /v1/runs/{runId}/cancel:
+    post:
+      tags: [Node]
+      summary: Cancel run
+      operationId: cancelRun
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Run cancelled
+
+  /v1/runs/{runId}/events:
+    get:
+      tags: [Node]
+      summary: Stream run events
+      operationId: streamRunEvents
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event stream
+          content:
+            text/event-stream:
+              schema:
+                type: string

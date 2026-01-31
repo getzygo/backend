@@ -1,0 +1,55 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify build
+        run: |
+          test -f dist/index.js || { echo "Build failed: dist/index.js not found"; exit 1; }
+          echo "Build verification passed"
+
+      - name: Deploy to server
+        uses: easingthemes/ssh-deploy@main
+        with:
+          SSH_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          REMOTE_HOST: 178.156.195.2
+          REMOTE_USER: zygo
+          TARGET: /home/zygo/zygo-backend/
+          SOURCE: "./"
+          EXCLUDE: "node_modules/, .git/, .env"
+          ARGS: "-avz --delete"
+
+      - name: Restart backend service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 178.156.195.2
+          username: zygo
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /home/zygo/zygo-backend
+            npm ci --production
+            pm2 restart zygo-backend || pm2 start dist/index.js --name zygo-backend
+            pm2 save
+            echo "Backend restarted successfully"
