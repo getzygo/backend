@@ -4,7 +4,7 @@
  * Handles user creation, authentication, and management.
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import * as argon2 from 'argon2';
 import { getDb } from '../db/client';
 import { users, socialLogins, auditLogs } from '../db/schema';
@@ -65,8 +65,10 @@ export async function getSocialLogin(
   const result = await db
     .select()
     .from(socialLogins)
-    .where(eq(socialLogins.provider, provider))
-    .where(eq(socialLogins.providerUserId, providerUserId))
+    .where(and(
+      eq(socialLogins.provider, provider),
+      eq(socialLogins.providerUserId, providerUserId)
+    ))
     .limit(1);
 
   return result[0] || null;
