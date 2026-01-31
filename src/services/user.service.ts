@@ -5,27 +5,22 @@
  */
 
 import { eq, and } from 'drizzle-orm';
-import * as argon2 from 'argon2';
+import * as bcrypt from 'bcrypt';
 import { getDb } from '../db/client';
 import { users, socialLogins, auditLogs } from '../db/schema';
 import type { User, NewUser, NewSocialLogin, NewAuditLog } from '../db/schema';
 import type { OAuthProvider, OAuthPendingSignup } from '../types/oauth';
 
 /**
- * Argon2 hashing configuration (OWASP recommended)
+ * Bcrypt salt rounds (OWASP recommended: 10-12)
  */
-const ARGON2_CONFIG = {
-  type: argon2.argon2id,
-  memoryCost: 65536, // 64 MB
-  timeCost: 3,
-  parallelism: 4,
-};
+const BCRYPT_SALT_ROUNDS = 12;
 
 /**
- * Hash a password using Argon2id
+ * Hash a password using bcrypt
  */
 export async function hashPassword(password: string): Promise<string> {
-  return argon2.hash(password, ARGON2_CONFIG);
+  return bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
 }
 
 /**
@@ -35,7 +30,7 @@ export async function verifyPassword(
   password: string,
   hash: string
 ): Promise<boolean> {
-  return argon2.verify(hash, password);
+  return bcrypt.compare(password, hash);
 }
 
 /**
