@@ -93,8 +93,10 @@ Detailed documentation is available in the `contracts/` directory:
 
 ## Related Repositories
 
-| Repo | Purpose |
-|------|---------|
-| [tenant](https://github.com/getzygo/tenant) | Tenant dashboard frontend |
-| [admin](https://github.com/getzygo/admin) | Admin panel frontend |
-| [landing](https://github.com/getzygo/landing) | Landing page |
+| Repo | Domain | Server | Purpose |
+|------|--------|--------|---------|
+| [backend](https://github.com/getzygo/backend) | `api.zygo.tech` | 178.156.195.2 | Backend API (this repo) |
+| [tenant](https://github.com/getzygo/tenant) | `{tenant}.zygo.tech` | 89.167.2.123 | Tenant dashboard |
+| [admin](https://github.com/getzygo/admin) | `admin.zygo.tech` | 89.167.2.123 | Global admin panel |
+| [landing](https://github.com/getzygo/landing) | `getzygo.com` | 5.161.85.81 | Public landing, auth pages |
+| [docs](https://github.com/getzygo/docs) | `docs.getzygo.com` | 5.161.85.81 | Documentation |
