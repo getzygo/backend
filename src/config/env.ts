@@ -78,6 +78,10 @@ const envSchema = z.object({
     .transform((v) => v === 'true')
     .default('false'),
   EMAIL_FROM: z.string().default('noreply@zygo.tech'),
+
+  // Cloudflare Access (Zero Trust)
+  CF_ACCESS_CLIENT_ID: z.string().optional(),
+  CF_ACCESS_CLIENT_SECRET: z.string().optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

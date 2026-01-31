@@ -12,6 +12,20 @@ let supabaseClient: SupabaseClient | null = null;
 let supabaseAdminClient: SupabaseClient | null = null;
 
 /**
+ * Get Cloudflare Access headers for Zero Trust authentication
+ */
+function getCFAccessHeaders(): Record<string, string> {
+  const env = getEnv();
+  if (env.CF_ACCESS_CLIENT_ID && env.CF_ACCESS_CLIENT_SECRET) {
+    return {
+      'CF-Access-Client-Id': env.CF_ACCESS_CLIENT_ID,
+      'CF-Access-Client-Secret': env.CF_ACCESS_CLIENT_SECRET,
+    };
+  }
+  return {};
+}
+
+/**
  * Get Supabase client (anon key - for client-side operations)
  */
 export function getSupabase(): SupabaseClient {
@@ -22,6 +36,9 @@ export function getSupabase(): SupabaseClient {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+    },
+    global: {
+      headers: getCFAccessHeaders(),
     },
   });
 
@@ -39,6 +56,9 @@ export function getSupabaseAdmin(): SupabaseClient {
     auth: {
       autoRefreshToken: false,
       persistSession: false,
+    },
+    global: {
+      headers: getCFAccessHeaders(),
     },
   });
 
