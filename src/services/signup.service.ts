@@ -24,7 +24,6 @@ import {
 import { hashPassword, getUserByEmail } from './user.service';
 import { sendVerificationEmail } from './email.service';
 import { cachePermissions, ALL_PERMISSIONS } from './permission.service';
-import { createAuthUser } from './supabase.service';
 
 // Trial period in days
 const TRIAL_PERIOD_DAYS = 14;
@@ -120,19 +119,7 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
     throw new Error('This workspace URL is already taken');
   }
 
-  // Create user in Supabase Auth first
-  const authResult = await createAuthUser(normalizedEmail, password, {
-    first_name: firstName,
-    last_name: lastName,
-  });
-
-  if (authResult.error) {
-    throw new Error(authResult.error);
-  }
-
-  const supabaseUserId = authResult.user?.id;
-
-  // Hash password for local storage
+  // Hash password for storage (no Supabase Auth - direct database auth)
   const passwordHash = await hashPassword(password);
 
   const now = new Date();
@@ -145,7 +132,7 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
     const [user] = await tx
       .insert(users)
       .values({
-        id: supabaseUserId, // Use Supabase user ID
+        // Let database generate the UUID
         email: normalizedEmail,
         emailVerified: false,
         passwordHash,
