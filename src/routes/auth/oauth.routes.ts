@@ -907,10 +907,18 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         );
       }
 
-      // Generate auth token for the new tenant
+      // Get avatar from existing user or Supabase metadata
+      const userMeta = supabaseUser.user_metadata || {};
+      const avatarUrl = existingUser.avatarUrl || userMeta.avatar_url || userMeta.picture;
+
+      // Generate auth token for the new tenant - include user profile data
       const authToken = Buffer.from(JSON.stringify({
         userId: existingUser.id,
         tenantId: tenantResult.tenant.id,
+        email: existingUser.email,
+        firstName: existingUser.firstName,
+        lastName: existingUser.lastName,
+        avatarUrl: avatarUrl,
         exp: Date.now() + 120000, // 2 minutes
       })).toString('base64url');
 
@@ -922,6 +930,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
             email: existingUser.email,
             firstName: existingUser.firstName,
             lastName: existingUser.lastName,
+            avatarUrl: avatarUrl,
           },
           tenant: tenantResult.tenant,
           role: tenantResult.ownerRole,
@@ -973,18 +982,25 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       userAgent: userAgent || undefined,
     });
 
+    // Get avatar from OAuth provider
+    const avatarUrl = userMeta.avatar_url || userMeta.picture;
+
     // Generate a short-lived auth token for redirect
     // This token is passed in the URL and validated by the tenant app
     const authToken = Buffer.from(JSON.stringify({
       userId: result.user.id,
       tenantId: result.tenant.id,
+      email: result.user.email,
+      firstName: result.user.firstName,
+      lastName: result.user.lastName,
+      avatarUrl: avatarUrl,
       exp: Date.now() + 120000, // 2 minutes
     })).toString('base64url');
 
     return c.json(
       {
         success: true,
-        user: result.user,
+        user: { ...result.user, avatarUrl },
         tenant: result.tenant,
         role: result.role,
         auth_token: authToken,
