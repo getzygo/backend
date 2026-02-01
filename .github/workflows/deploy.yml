@@ -41,7 +41,7 @@ jobs:
           EXCLUDE: "node_modules/, .git/, .env"
           ARGS: "-avz --delete"
 
-      - name: Restart backend service
+      - name: Setup database and restart service
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: 178.156.195.2
@@ -50,6 +50,20 @@ jobs:
           script: |
             cd /opt/zygo/backend
             npm ci --production
+
+            # Load environment variables
+            set -a
+            source .env
+            set +a
+
+            # Apply database schema (idempotent)
+            npm run db:push
+
+            # Apply RLS functions and policies (idempotent)
+            psql "$DATABASE_URL" -f drizzle/rls-functions.sql
+            psql "$DATABASE_URL" -f drizzle/rls-policies.sql
+
+            # Restart service (seeds permissions on startup if needed)
             pm2 restart zygo-api
             pm2 save
-            echo "Backend restarted successfully"
+            echo "Backend deployed and database updated successfully"
