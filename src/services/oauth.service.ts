@@ -262,8 +262,161 @@ export async function clearPendingSignup(oauthToken: string): Promise<void> {
   await deletePendingSignup(oauthToken);
 }
 
+/**
+ * Store pending link request in Redis (for users with tenants)
+ */
+interface OAuthPendingLink {
+  provider: OAuthProvider;
+  providerUserId: string;
+  providerEmail: string;
+  userId: string;
+  verificationCode: string;
+  attempts: number;
+  createdAt: number;
+}
+
+async function storePendingLink(token: string, data: OAuthPendingLink): Promise<void> {
+  const redis = getRedis();
+  const key = `${REDIS_KEYS.OAUTH_PENDING}link:${token}`;
+  // Link verifications expire in 15 minutes
+  await redis.setex(key, 900, JSON.stringify(data));
+}
+
+async function getPendingLinkFromRedis(token: string): Promise<OAuthPendingLink | null> {
+  const redis = getRedis();
+  const key = `${REDIS_KEYS.OAUTH_PENDING}link:${token}`;
+  const data = await redis.get(key);
+  if (!data) return null;
+  try {
+    return JSON.parse(data) as OAuthPendingLink;
+  } catch {
+    return null;
+  }
+}
+
+async function updatePendingLink(token: string, data: OAuthPendingLink): Promise<void> {
+  const redis = getRedis();
+  const key = `${REDIS_KEYS.OAUTH_PENDING}link:${token}`;
+  // Get remaining TTL
+  const ttl = await redis.ttl(key);
+  if (ttl > 0) {
+    await redis.setex(key, ttl, JSON.stringify(data));
+  }
+}
+
+async function deletePendingLink(token: string): Promise<void> {
+  const redis = getRedis();
+  const key = `${REDIS_KEYS.OAUTH_PENDING}link:${token}`;
+  await redis.del(key);
+}
+
+/**
+ * Generate a 6-digit verification code
+ */
+function generateVerificationCode(): string {
+  return crypto.randomInt(100000, 999999).toString();
+}
+
+/**
+ * Create a pending link request (requires email verification)
+ * Per Section 10.2 - users with existing tenants must verify via email
+ */
+export async function createPendingLinkRequest(
+  userId: string,
+  provider: OAuthProvider,
+  providerUserId: string,
+  providerEmail: string
+): Promise<{ linkToken: string; verificationCode: string }> {
+  const linkToken = generateSecureToken();
+  const verificationCode = generateVerificationCode();
+
+  const pendingLink: OAuthPendingLink = {
+    provider,
+    providerUserId,
+    providerEmail,
+    userId,
+    verificationCode,
+    attempts: 0,
+    createdAt: Date.now(),
+  };
+
+  await storePendingLink(linkToken, pendingLink);
+
+  return { linkToken, verificationCode };
+}
+
+/**
+ * Verify link request code
+ * Returns provider info if successful, null if invalid/expired
+ */
+export async function verifyLinkCode(
+  linkToken: string,
+  code: string
+): Promise<{ provider: OAuthProvider; providerUserId: string; providerEmail: string } | null> {
+  const pendingLink = await getPendingLinkFromRedis(linkToken);
+
+  if (!pendingLink) {
+    return null; // Expired or invalid token
+  }
+
+  // Check max attempts (3)
+  if (pendingLink.attempts >= 3) {
+    await deletePendingLink(linkToken);
+    return null;
+  }
+
+  // Verify code
+  if (pendingLink.verificationCode !== code) {
+    // Increment attempts
+    pendingLink.attempts++;
+    await updatePendingLink(linkToken, pendingLink);
+    return null;
+  }
+
+  // Success - return provider info
+  return {
+    provider: pendingLink.provider,
+    providerUserId: pendingLink.providerUserId,
+    providerEmail: pendingLink.providerEmail,
+  };
+}
+
+/**
+ * Get pending link data (for checking status)
+ */
+export async function getPendingLink(linkToken: string): Promise<{
+  userId: string;
+  provider: OAuthProvider;
+  providerEmail: string;
+  attemptsRemaining: number;
+} | null> {
+  const pendingLink = await getPendingLinkFromRedis(linkToken);
+
+  if (!pendingLink) {
+    return null;
+  }
+
+  return {
+    userId: pendingLink.userId,
+    provider: pendingLink.provider,
+    providerEmail: pendingLink.providerEmail,
+    attemptsRemaining: Math.max(0, 3 - pendingLink.attempts),
+  };
+}
+
+/**
+ * Clear pending link after successful linking
+ */
+export async function clearPendingLink(linkToken: string): Promise<void> {
+  await deletePendingLink(linkToken);
+}
+
 export const oauthService = {
   handleOAuthCallback,
   getPendingSignup,
   clearPendingSignup,
+  createPendingLinkRequest,
+  verifyLinkCode,
+  getPendingLink,
+  clearPendingLink,
 };

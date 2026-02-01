@@ -238,11 +238,166 @@ export async function createUser(params: {
   return user;
 }
 
+/**
+ * Get user by ID
+ */
+export async function getUserById(userId: string): Promise<User | null> {
+  const db = getDb();
+
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+
+  return result[0] || null;
+}
+
+/**
+ * Get social logins for a user
+ */
+export async function getUserSocialLogins(userId: string) {
+  const db = getDb();
+
+  const result = await db
+    .select()
+    .from(socialLogins)
+    .where(eq(socialLogins.userId, userId));
+
+  return result;
+}
+
+/**
+ * Link an OAuth provider to an existing user
+ */
+export async function linkSocialLogin(params: {
+  userId: string;
+  provider: OAuthProvider;
+  providerUserId: string;
+  providerEmail: string;
+  ipAddress?: string;
+  userAgent?: string;
+}): Promise<void> {
+  const db = getDb();
+  const { userId, provider, providerUserId, providerEmail, ipAddress, userAgent } = params;
+
+  // Check if this social login is already linked to another user
+  const existingSocialLogin = await getSocialLogin(provider, providerUserId);
+  if (existingSocialLogin) {
+    if (existingSocialLogin.userId === userId) {
+      // Already linked to this user
+      return;
+    }
+    throw new Error('This social account is already linked to another user');
+  }
+
+  // Check if user already has this provider linked
+  const userSocialLogins = await getUserSocialLogins(userId);
+  const existingProviderLink = userSocialLogins.find((sl) => sl.provider === provider);
+  if (existingProviderLink) {
+    throw new Error(`You already have a ${provider} account linked`);
+  }
+
+  const now = new Date();
+
+  // Create social login record
+  const newSocialLogin: NewSocialLogin = {
+    userId,
+    provider,
+    providerUserId,
+    providerEmail,
+    lastLoginAt: now,
+  };
+
+  await db.insert(socialLogins).values(newSocialLogin);
+
+  // Create audit log
+  const auditLog: NewAuditLog = {
+    userId,
+    action: 'oauth_linked',
+    resourceType: 'social_login',
+    resourceId: provider,
+    details: {
+      provider,
+      providerEmail,
+    },
+    ipAddress,
+    userAgent,
+    status: 'success',
+  };
+
+  await db.insert(auditLogs).values(auditLog);
+}
+
+/**
+ * Unlink an OAuth provider from a user
+ */
+export async function unlinkSocialLogin(params: {
+  userId: string;
+  provider: OAuthProvider;
+  ipAddress?: string;
+  userAgent?: string;
+}): Promise<void> {
+  const db = getDb();
+  const { userId, provider, ipAddress, userAgent } = params;
+
+  // Find the social login
+  const userSocialLogins = await getUserSocialLogins(userId);
+  const socialLogin = userSocialLogins.find((sl) => sl.provider === provider);
+
+  if (!socialLogin) {
+    throw new Error(`No ${provider} account is linked`);
+  }
+
+  // Delete the social login
+  await db
+    .delete(socialLogins)
+    .where(and(eq(socialLogins.userId, userId), eq(socialLogins.provider, provider)));
+
+  // Create audit log
+  const auditLog: NewAuditLog = {
+    userId,
+    action: 'oauth_unlinked',
+    resourceType: 'social_login',
+    resourceId: provider,
+    details: {
+      provider,
+    },
+    ipAddress,
+    userAgent,
+    status: 'success',
+  };
+
+  await db.insert(auditLogs).values(auditLog);
+}
+
+/**
+ * Update social login last login time
+ */
+export async function updateSocialLoginTimestamp(
+  provider: OAuthProvider,
+  providerUserId: string
+): Promise<void> {
+  const db = getDb();
+
+  await db
+    .update(socialLogins)
+    .set({ lastLoginAt: new Date() })
+    .where(
+      and(eq(socialLogins.provider, provider), eq(socialLogins.providerUserId, providerUserId))
+    );
+}
+
 export const userService = {
   hashPassword,
   verifyPassword,
   getUserByEmail,
+  getUserById,
   getSocialLogin,
+  getUserSocialLogins,
   createUserWithOAuth,
   createUser,
+  linkSocialLogin,
+  unlinkSocialLogin,
+  updateSocialLoginTimestamp,
 };

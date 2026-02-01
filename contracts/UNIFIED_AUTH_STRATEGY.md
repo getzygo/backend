@@ -1278,9 +1278,9 @@ ALTER TABLE users ADD COLUMN block_reason VARCHAR(50);
 - [x] Tenant-specific security config (GET/PATCH /api/v1/tenants/:id/security-config)
 
 ### Phase 4: OAuth & Linking
-- [ ] Google, GitHub OAuth
-- [ ] Account linking with verification
-- [ ] Auto-link for users without tenants
+- [x] Google, GitHub OAuth (POST /api/v1/auth/oauth/callback, /signin)
+- [x] Account linking with verification (POST /api/v1/auth/oauth/link/initiate, /verify)
+- [x] Auto-link for users without tenants (automatic in /oauth/signin)
 
 ### Phase 5: Enterprise
 - [ ] SAML/OIDC configuration

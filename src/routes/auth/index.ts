@@ -5,7 +5,8 @@
  */
 
 import { Hono } from 'hono';
-import oauthRoutes from './oauth';
+import oauthLegacyRoutes from './oauth';
+import oauthRoutes from './oauth.routes';
 import signupRoutes from './signup.routes';
 import signinRoutes from './signin.routes';
 import verifyEmailRoutes from './verify-email.routes';
@@ -19,6 +20,7 @@ const app = new Hono();
 // Signup routes
 // POST /api/v1/auth/signup
 // GET /api/v1/auth/signup/check-slug/:slug
+// GET /api/v1/auth/signup/plans
 app.route('/signup', signupRoutes);
 
 // Signin routes
@@ -53,10 +55,18 @@ app.route('/mfa', mfaRoutes);
 // GET /api/v1/auth/tenants
 app.route('/', completeProfileRoutes);
 
-// OAuth routes (legacy, mounted at /oauth and /signup for backwards compatibility)
-// POST /api/v1/auth/oauth/callback
-// POST /api/v1/auth/signup/oauth
+// OAuth routes (Phase 4)
+// POST /api/v1/auth/oauth/callback - Exchange OAuth code
+// POST /api/v1/auth/oauth/signin - OAuth signin for existing users
+// POST /api/v1/auth/oauth/link/initiate - Start account linking
+// POST /api/v1/auth/oauth/link/verify - Complete account linking
+// GET /api/v1/auth/oauth/providers - List linked providers
+// DELETE /api/v1/auth/oauth/providers/:provider - Unlink provider
 app.route('/oauth', oauthRoutes);
+
+// Legacy OAuth routes (backwards compatibility)
+// POST /api/v1/auth/signup/oauth
+app.route('/signup', oauthLegacyRoutes);
 
 // Password reset routes
 // POST /api/v1/auth/forgot-password
