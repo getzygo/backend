@@ -29,6 +29,7 @@ import {
 import { hashPassword, getUserByEmail } from './user.service';
 import { sendVerificationEmail } from './email.service';
 import { cachePermissions } from './permission.service';
+import { isValidSlug, isBlockedSlug } from '../utils/slug-validation';
 
 // Trial period in days
 const TRIAL_PERIOD_DAYS = 14;
@@ -107,26 +108,7 @@ export interface SignupResult {
   redirectUrl: string;
 }
 
-/**
- * Validate tenant slug format
- */
-function isValidSlug(slug: string): boolean {
-  const slugRegex = /^[a-z0-9]([a-z0-9-]{1,48}[a-z0-9])?$/;
-  return slugRegex.test(slug);
-}
-
-/**
- * Check if slug is reserved
- */
-function isReservedSlug(slug: string): boolean {
-  const reserved = [
-    'api', 'app', 'www', 'admin', 'help', 'support', 'blog', 'docs',
-    'status', 'mail', 'ftp', 'ssh', 'test', 'dev', 'staging', 'prod',
-    'production', 'zygo', 'auth', 'login', 'signup', 'register',
-    'account', 'settings', 'billing', 'dashboard', 'demo', 'trial',
-  ];
-  return reserved.includes(slug.toLowerCase());
-}
+// Slug validation imported from ../utils/slug-validation
 
 /**
  * Validate compliance requirements
@@ -214,7 +196,7 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
     throw new Error('Invalid workspace URL format. Use lowercase letters, numbers, and hyphens.');
   }
 
-  if (isReservedSlug(normalizedSlug)) {
+  if (isBlockedSlug(normalizedSlug)) {
     throw new Error('This workspace URL is reserved. Please choose another.');
   }
 
@@ -513,7 +495,7 @@ export async function signupWithOAuth(params: {
     throw new Error('Invalid workspace URL format');
   }
 
-  if (isReservedSlug(normalizedSlug)) {
+  if (isBlockedSlug(normalizedSlug)) {
     throw new Error('This workspace URL is reserved');
   }
 

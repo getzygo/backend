@@ -22,60 +22,19 @@ import {
   type TenantMember,
 } from '../db/schema';
 import { invalidateTenantConfigCache } from './verification.service';
+import { isValidSlug, isBlockedSlug } from '../utils/slug-validation';
+
+// Re-export for backwards compatibility
+export { isValidSlug, isBlockedSlug };
 
 // Trial period in days
 const TRIAL_PERIOD_DAYS = 14;
 
 /**
- * Validate tenant slug format
- */
-export function isValidSlug(slug: string): boolean {
-  // Lowercase alphanumeric with hyphens, 3-50 chars, can't start/end with hyphen
-  const slugRegex = /^[a-z0-9]([a-z0-9-]{1,48}[a-z0-9])?$/;
-  return slugRegex.test(slug);
-}
-
-/**
- * Check if a slug is reserved
- */
-export function isReservedSlug(slug: string): boolean {
-  const reserved = [
-    'api',
-    'app',
-    'www',
-    'admin',
-    'help',
-    'support',
-    'blog',
-    'docs',
-    'status',
-    'mail',
-    'ftp',
-    'ssh',
-    'test',
-    'dev',
-    'staging',
-    'prod',
-    'production',
-    'zygo',
-    'auth',
-    'login',
-    'signup',
-    'register',
-    'account',
-    'settings',
-    'billing',
-    'dashboard',
-  ];
-
-  return reserved.includes(slug.toLowerCase());
-}
-
-/**
  * Check if a slug is available
  */
 export async function isSlugAvailable(slug: string): Promise<boolean> {
-  if (!isValidSlug(slug) || isReservedSlug(slug)) {
+  if (!isValidSlug(slug) || isBlockedSlug(slug)) {
     return false;
   }
 
@@ -171,7 +130,7 @@ export async function createTenant(params: {
     throw new Error('Invalid slug format');
   }
 
-  if (isReservedSlug(slug)) {
+  if (isBlockedSlug(slug)) {
     throw new Error('This slug is reserved');
   }
 
@@ -384,7 +343,7 @@ export async function getTenantMembership(
 
 export const tenantService = {
   isValidSlug,
-  isReservedSlug,
+  isBlockedSlug,
   isSlugAvailable,
   getTenantBySlug,
   getTenantById,
