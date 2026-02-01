@@ -35,6 +35,7 @@ import domainsRoutes from './domains.routes';
 import {
   getUserTenants,
   getTenantById,
+  getTenantBySlug,
   getTenantSecurityConfig,
   updateTenantSecurityConfig,
   isTenantMember,
@@ -48,7 +49,122 @@ import type { User } from '../../db/schema';
 
 const app = new Hono();
 
-// Apply auth middleware to all routes
+/**
+ * GET /api/v1/tenants/:slugOrId/config
+ * Public endpoint - Get tenant configuration by slug or ID
+ * Used by tenant frontend apps to load tenant branding and settings
+ * No authentication required
+ */
+app.get('/:slugOrId/config', async (c) => {
+  const slugOrId = c.req.param('slugOrId');
+
+  // Try to find tenant by slug first, then by ID
+  let tenant = await getTenantBySlug(slugOrId);
+
+  if (!tenant) {
+    // Try by ID if not found by slug
+    tenant = await getTenantById(slugOrId);
+  }
+
+  if (!tenant) {
+    return c.json(
+      {
+        error: 'tenant_not_found',
+        message: 'Tenant not found. Please check the URL.',
+      },
+      404
+    );
+  }
+
+  // Check tenant status
+  if (tenant.status === 'suspended') {
+    return c.json(
+      {
+        error: 'tenant_suspended',
+        code: 'tenant_suspended',
+        message: 'This workspace has been suspended. Please contact support.',
+      },
+      403
+    );
+  }
+
+  if (tenant.status !== 'active') {
+    return c.json(
+      {
+        error: 'tenant_inactive',
+        message: 'This workspace is not active.',
+      },
+      403
+    );
+  }
+
+  // Get security config for SSO/MFA settings
+  const securityConfig = await getTenantSecurityConfig(tenant.id);
+
+  // Return public tenant configuration
+  return c.json({
+    data: {
+      id: tenant.id,
+      slug: tenant.slug,
+      name: tenant.name,
+      status: tenant.status,
+      plan: {
+        name: tenant.plan.charAt(0).toUpperCase() + tenant.plan.slice(1),
+        tier: tenant.plan,
+        features: getPlanFeatures(tenant.plan),
+      },
+      branding: {
+        logo: tenant.logoUrl || undefined,
+        primaryColor: tenant.primaryColor || '#6366f1',
+        customDomain: tenant.customDomain || undefined,
+      },
+      settings: {
+        ssoEnabled: securityConfig?.ssoEnabled || false,
+        mfaRequired: securityConfig?.requireMfa || false,
+        ipWhitelist: securityConfig?.ipWhitelist || [],
+      },
+      limits: getPlanLimits(tenant.plan, tenant.licenseCount || 1),
+      usage: {
+        users: 0, // TODO: Calculate actual usage
+        nodes: 0,
+        executionsThisMonth: 0,
+        storageUsed: 0,
+      },
+    },
+  });
+});
+
+// Helper function to get plan features
+function getPlanFeatures(plan: string): string[] {
+  const features: Record<string, string[]> = {
+    core: ['api_access', 'email_support'],
+    flow: ['webhooks', 'api_access', 'email_support', 'advanced_analytics'],
+    scale: ['webhooks', 'sso', 'advanced_analytics', 'custom_roles', 'api_access', 'priority_support'],
+    enterprise: ['webhooks', 'sso', 'advanced_analytics', 'custom_roles', 'api_access', 'priority_support', 'dedicated_support', 'sla_guarantee', 'custom_integrations', 'audit_logs'],
+  };
+  return features[plan] || features.core;
+}
+
+// Helper function to get plan limits
+function getPlanLimits(plan: string, licenseCount: number): Record<string, number> {
+  const baseLimits: Record<string, { users: number; nodes: number; executions: number; storage: number }> = {
+    core: { users: 1, nodes: 50, executions: 10000, storage: 1 * 1024 * 1024 * 1024 },
+    flow: { users: 50, nodes: 500, executions: 100000, storage: 10 * 1024 * 1024 * 1024 },
+    scale: { users: 200, nodes: 5000, executions: 1000000, storage: 100 * 1024 * 1024 * 1024 },
+    enterprise: { users: -1, nodes: -1, executions: -1, storage: -1 }, // Unlimited
+  };
+
+  const limits = baseLimits[plan] || baseLimits.core;
+
+  return {
+    maxUsers: limits.users === -1 ? -1 : Math.max(limits.users, licenseCount),
+    maxNodes: limits.nodes,
+    maxExecutionsPerMonth: limits.executions,
+    maxStorage: limits.storage,
+  };
+}
+
+// Apply auth middleware to remaining routes (after the public /config endpoint)
 app.use('*', authMiddleware);
 
 /**
