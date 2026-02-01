@@ -251,15 +251,23 @@ app.post('/signin', async (c) => {
         },
       };
 
+      // Get avatar from Supabase user metadata
+      const supabaseMeta = supabaseUser.user_metadata || {};
+      const avatarUrl = user.avatarUrl || supabaseMeta.avatar_url || supabaseMeta.picture;
+
       // Determine redirect
       if (userTenants.length === 1) {
         const tenant = userTenants[0].tenant;
         const verificationStatus = await checkVerificationStatus(user, tenant.id);
 
-        // Generate auth token for redirect
+        // Generate auth token for redirect - include user info for the tenant app
         const authToken = Buffer.from(JSON.stringify({
           userId: user.id,
           tenantId: tenant.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          avatarUrl: avatarUrl,
           exp: Date.now() + 60000, // 60 seconds
         })).toString('base64url');
 
