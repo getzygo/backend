@@ -49,10 +49,11 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd /opt/zygo/backend
+            export CI=true
             npm ci
 
-            # Apply database schema (idempotent, auto-answer prompts)
-            yes n | npm run db:push || true
+            # Apply database schema (non-interactive mode)
+            npm run db:push
 
             # Apply RLS functions and policies (idempotent)
             npm run db:apply-rls
