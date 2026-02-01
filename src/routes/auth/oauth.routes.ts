@@ -28,7 +28,8 @@ import {
 } from '../../services/user.service';
 import { getUserTenants } from '../../services/tenant.service';
 import { checkVerificationStatus } from '../../services/verification.service';
-import { signInWithPassword } from '../../services/supabase.service';
+import { signInWithPassword, getSession } from '../../services/supabase.service';
+import { signupWithOAuth } from '../../services/signup.service';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
@@ -579,6 +580,182 @@ app.delete('/providers/:provider', authMiddleware, async (c) => {
         message,
       },
       500
+    );
+  }
+});
+
+// Complete signup schema for OAuth users
+const completeSignupSchema = z.object({
+  // Plan Selection
+  plan: z.enum(['core', 'flow', 'scale', 'enterprise']),
+  billing_cycle: z.enum(['monthly', 'annual']),
+  license_count: z.number().int().min(1).max(1000).optional(),
+
+  // User Details (partial - some come from OAuth)
+  first_name: z.string().min(1).max(100),
+  last_name: z.string().min(1).max(100),
+  phone: z.string().min(5).max(20),
+  phone_country_code: z.string().min(1).max(5),
+  country: z.string().length(2),
+  city: z.string().min(1).max(100),
+
+  // Company Details (optional for Core plan)
+  company_name: z.string().min(2).max(200).optional(),
+  industry: z.enum(['technology', 'finance', 'healthcare', 'manufacturing', 'retail', 'other']).optional(),
+  company_size: z.enum(['1-10', '11-50', '51-200', '201-500', '500+']).optional(),
+
+  // Workspace Setup
+  workspace_name: z.string().min(2).max(100),
+  workspace_subdomain: z
+    .string()
+    .min(3)
+    .max(50)
+    .regex(/^[a-z0-9]([a-z0-9-]{0,48}[a-z0-9])?$/),
+  compliance_requirements: z.array(z.enum(['GDPR', 'HIPAA', 'SOC2', 'PCI-DSS', 'ISO27001'])).optional().default([]),
+
+  // Legal
+  terms_accepted: z.boolean().refine((v) => v === true, {
+    message: 'You must accept the terms of service',
+  }),
+});
+
+/**
+ * POST /api/v1/auth/oauth/complete-signup
+ * Complete signup for OAuth users with onboarding data
+ * Requires Supabase access token in Authorization header
+ */
+app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c) => {
+  const body = c.req.valid('json');
+  const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const userAgent = c.req.header('user-agent');
+
+  // Get access token from Authorization header
+  const authHeader = c.req.header('authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json(
+      {
+        error: 'unauthorized',
+        message: 'Missing or invalid authorization header',
+      },
+      401
+    );
+  }
+
+  const accessToken = authHeader.substring(7);
+
+  try {
+    // Verify token with Supabase and get user info
+    const { user: supabaseUser, error: sessionError } = await getSession(accessToken);
+
+    if (sessionError || !supabaseUser) {
+      return c.json(
+        {
+          error: 'invalid_token',
+          message: sessionError || 'Invalid or expired access token',
+        },
+        401
+      );
+    }
+
+    // Get provider from Supabase user
+    const provider = supabaseUser.app_metadata?.provider as 'google' | 'github' | undefined;
+    if (!provider || !['google', 'github'].includes(provider)) {
+      return c.json(
+        {
+          error: 'invalid_provider',
+          message: 'OAuth provider not found or unsupported',
+        },
+        400
+      );
+    }
+
+    // Check if user already exists in our database
+    const existingUser = await getUserByEmail(supabaseUser.email!);
+    if (existingUser) {
+      // User exists - check if they have a tenant
+      const userTenants = await getUserTenants(existingUser.id);
+      if (userTenants.length > 0) {
+        return c.json(
+          {
+            error: 'user_exists',
+            message: 'An account with this email already exists',
+            redirect_url: `https://${userTenants[0].tenant.slug}.zygo.tech`,
+          },
+          409
+        );
+      }
+    }
+
+    // Create user and tenant using signupWithOAuth
+    const result = await signupWithOAuth({
+      provider,
+      providerUserId: supabaseUser.id,
+      email: supabaseUser.email!,
+      firstName: body.first_name,
+      lastName: body.last_name,
+
+      plan: body.plan,
+      billingCycle: body.billing_cycle,
+      licenseCount: body.license_count,
+
+      phone: body.phone,
+      phoneCountryCode: body.phone_country_code,
+      country: body.country,
+      city: body.city,
+
+      companyName: body.company_name,
+      industry: body.industry,
+      companySize: body.company_size,
+
+      workspaceName: body.workspace_name,
+      workspaceSubdomain: body.workspace_subdomain,
+      complianceRequirements: body.compliance_requirements,
+
+      termsAccepted: body.terms_accepted,
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+    });
+
+    return c.json(
+      {
+        success: true,
+        user: result.user,
+        tenant: result.tenant,
+        role: result.role,
+        redirect_url: `https://${result.tenant.slug}.zygo.tech`,
+      },
+      201
+    );
+  } catch (error) {
+    console.error('OAuth complete signup error:', error);
+    const message = error instanceof Error ? error.message : 'Signup failed';
+
+    if (message.includes('email already exists')) {
+      return c.json(
+        {
+          error: 'email_exists',
+          message: 'An account with this email already exists',
+        },
+        409
+      );
+    }
+
+    if (message.includes('workspace URL') || message.includes('slug')) {
+      return c.json(
+        {
+          error: 'slug_unavailable',
+          message,
+        },
+        409
+      );
+    }
+
+    return c.json(
+      {
+        error: 'signup_failed',
+        message,
+      },
+      400
     );
   }
 });
