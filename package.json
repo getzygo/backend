@@ -13,7 +13,7 @@
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
     "db:seed": "tsx src/scripts/seed.ts",
-    "db:rls": "echo 'Run: psql $DATABASE_URL -f drizzle/rls-functions.sql && psql $DATABASE_URL -f drizzle/rls-policies.sql'"
+    "db:apply-rls": "tsx src/scripts/apply-rls.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.8.0",

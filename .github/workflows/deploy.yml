@@ -49,19 +49,13 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd /opt/zygo/backend
-            npm ci --production
-
-            # Load environment variables
-            set -a
-            source .env
-            set +a
+            npm ci
 
             # Apply database schema (idempotent)
             npm run db:push
 
             # Apply RLS functions and policies (idempotent)
-            psql "$DATABASE_URL" -f drizzle/rls-functions.sql
-            psql "$DATABASE_URL" -f drizzle/rls-policies.sql
+            npm run db:apply-rls
 
             # Restart service (seeds permissions on startup if needed)
             pm2 restart zygo-api
