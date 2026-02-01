@@ -1273,9 +1273,9 @@ ALTER TABLE users ADD COLUMN block_reason VARCHAR(50);
 - [x] Secondary role assignment (time-limited)
 
 ### Phase 3: Multi-Tenant
-- [ ] Tenant picker
-- [ ] Tenant switching with verification check
-- [ ] Tenant-specific security config
+- [x] Tenant picker (GET /api/v1/tenants)
+- [x] Tenant switching with verification check (POST /api/v1/tenants/switch)
+- [x] Tenant-specific security config (GET/PATCH /api/v1/tenants/:id/security-config)
 
 ### Phase 4: OAuth & Linking
 - [ ] Google, GitHub OAuth

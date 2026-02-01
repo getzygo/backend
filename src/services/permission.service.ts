@@ -51,10 +51,12 @@ export const ALL_PERMISSIONS: Array<{
   { key: 'canViewRoles', name: 'View Roles', category: 'roles', description: 'View roles', requiresMfa: false, isCritical: false },
   { key: 'canAssignRoles', name: 'Assign Roles', category: 'roles', description: 'Assign roles to users', requiresMfa: false, isCritical: false },
 
-  // 4. Organization Settings (3)
+  // 4. Organization Settings (5)
   { key: 'canManageTenantSettings', name: 'Manage Tenant Settings', category: 'organization', description: 'Manage org settings', requiresMfa: false, isCritical: false },
   { key: 'canViewTenantSettings', name: 'View Tenant Settings', category: 'organization', description: 'View org settings', requiresMfa: false, isCritical: false },
   { key: 'canDeleteTenant', name: 'Delete Tenant', category: 'organization', description: 'Delete organization', requiresMfa: true, isCritical: true },
+  { key: 'canViewSecuritySettings', name: 'View Security Settings', category: 'organization', description: 'View tenant security configuration', requiresMfa: false, isCritical: false },
+  { key: 'canManageSecuritySettings', name: 'Manage Security Settings', category: 'organization', description: 'Manage tenant security configuration', requiresMfa: false, isCritical: false },
 
   // 5. Secrets & Environment Variables (5)
   { key: 'canManageSecrets', name: 'Manage Secrets', category: 'secrets', description: 'Create/edit secrets', requiresMfa: false, isCritical: false },
