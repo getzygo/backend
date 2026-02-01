@@ -716,13 +716,22 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       userAgent: userAgent || undefined,
     });
 
+    // Generate a short-lived auth token for redirect
+    // This token is passed in the URL and validated by the tenant app
+    const authToken = Buffer.from(JSON.stringify({
+      userId: result.user.id,
+      tenantId: result.tenant.id,
+      exp: Date.now() + 60000, // 60 seconds
+    })).toString('base64url');
+
     return c.json(
       {
         success: true,
         user: result.user,
         tenant: result.tenant,
         role: result.role,
-        redirect_url: `https://${result.tenant.slug}.zygo.tech`,
+        auth_token: authToken,
+        redirect_url: `https://${result.tenant.slug}.zygo.tech?auth_token=${authToken}`,
       },
       201
     );
