@@ -39,7 +39,7 @@ export type PlanType = 'core' | 'flow' | 'scale' | 'enterprise';
 export type BillingCycle = 'monthly' | 'annual';
 export type IndustryType = 'technology' | 'finance' | 'healthcare' | 'manufacturing' | 'retail' | 'other';
 export type CompanySizeType = '1-10' | '11-50' | '51-200' | '201-500' | '500+';
-export type ComplianceType = 'GDPR' | 'HIPAA' | 'SOC2' | 'PCI-DSS' | 'ISO27001';
+export type ComplianceType = 'GDPR' | 'HIPAA' | 'SOC2' | 'PCI-DSS' | 'ISO27001' | 'CCPA' | 'CPRA' | 'APPI';
 
 /**
  * Complete onboarding signup parameters
