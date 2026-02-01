@@ -78,27 +78,33 @@ app.get('/verification-status', authMiddleware, optionalTenantMiddleware, async 
 
 /**
  * GET /api/v1/auth/profile
+ * GET /api/v1/auth/me (alias)
  * Get current user profile
  */
-app.get('/profile', authMiddleware, async (c) => {
+const profileHandler = async (c: any) => {
   const user = c.get('user') as User;
 
   return c.json({
-    id: user.id,
-    email: user.email,
-    first_name: user.firstName,
-    last_name: user.lastName,
-    display_name: user.displayName,
-    avatar_url: user.avatarUrl,
-    phone: user.phone,
-    email_verified: user.emailVerified,
-    phone_verified: user.phoneVerified,
-    mfa_enabled: user.mfaEnabled,
-    status: user.status,
-    created_at: user.createdAt,
-    last_login_at: user.lastLoginAt,
+    data: {
+      id: user.id,
+      email: user.email,
+      first_name: user.firstName,
+      last_name: user.lastName,
+      display_name: user.displayName,
+      avatar_url: user.avatarUrl,
+      phone: user.phone,
+      email_verified: user.emailVerified,
+      phone_verified: user.phoneVerified,
+      mfa_enabled: user.mfaEnabled,
+      status: user.status,
+      created_at: user.createdAt,
+      last_login_at: user.lastLoginAt,
+    },
   });
-});
+};
+
+app.get('/profile', authMiddleware, profileHandler);
+app.get('/me', authMiddleware, profileHandler);
 
 /**
  * GET /api/v1/auth/tenants
