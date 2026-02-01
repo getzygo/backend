@@ -914,6 +914,18 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       const userMeta = supabaseUser.user_metadata || {};
       const avatarUrl = existingUser.avatarUrl || userMeta.avatar_url || userMeta.picture;
 
+      // Update email_verified_via if not already set (for users created before this field existed)
+      if (!existingUser.emailVerifiedVia && existingUser.emailVerified) {
+        const db = getDb();
+        await db
+          .update(users)
+          .set({
+            emailVerifiedVia: provider,
+            updatedAt: new Date(),
+          })
+          .where(eq(users.id, existingUser.id));
+      }
+
       // Generate auth token for the new tenant - include user profile data
       const authToken = Buffer.from(JSON.stringify({
         userId: existingUser.id,
