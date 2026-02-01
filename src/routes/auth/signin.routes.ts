@@ -11,7 +11,7 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { signInWithPassword } from '../../services/supabase.service';
 import { getUserByEmail, verifyPassword } from '../../services/user.service';
-import { getUserTenants, getTenantBySlug, isTenantMember } from '../../services/tenant.service';
+import { getUserTenants, getTenantBySlug, isTenantMember, getTenantMembershipWithRole } from '../../services/tenant.service';
 import { checkVerificationStatus } from '../../services/verification.service';
 import { mfaService } from '../../services/mfa.service';
 import { getDb } from '../../db/client';
@@ -259,6 +259,15 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
     if (verificationStatus && !verificationStatus.complete) {
       redirectUrl = '/complete-profile';
     } else {
+      // Get user's membership with role for this tenant
+      const membership = await getTenantMembershipWithRole(user.id, targetTenant.id);
+      if (!membership) {
+        return c.json(
+          { error: 'membership_not_found', message: 'User membership not found' },
+          500
+        );
+      }
+
       // Generate secure opaque auth token stored in Redis
       const authToken = await createAuthToken({
         userId: user.id,
@@ -268,6 +277,10 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
         lastName: user.lastName,
         avatarUrl: user.avatarUrl || undefined,
         emailVerifiedVia: user.emailVerifiedVia,
+        roleId: membership.role.id,
+        roleName: membership.role.name,
+        roleSlug: membership.role.slug,
+        isOwner: membership.isOwner,
       });
       redirectUrl = `https://${targetTenant.slug}.zygo.tech?auth_token=${authToken}`;
     }
@@ -429,10 +442,10 @@ app.post('/switch-tenant', zValidator('json', switchTenantSchema), async (c) => 
     );
   }
 
-  // Verify user is a member of the target tenant
-  const isMember = await isTenantMember(user.id, tenant.id);
+  // Get user's membership with role for this tenant (also verifies membership)
+  const membership = await getTenantMembershipWithRole(user.id, tenant.id);
 
-  if (!isMember) {
+  if (!membership) {
     return c.json(
       {
         error: 'not_a_member',
@@ -455,6 +468,10 @@ app.post('/switch-tenant', zValidator('json', switchTenantSchema), async (c) => 
     lastName: user.lastName,
     avatarUrl: avatarUrl,
     emailVerifiedVia: user.emailVerifiedVia,
+    roleId: membership.role.id,
+    roleName: membership.role.name,
+    roleSlug: membership.role.slug,
+    isOwner: membership.isOwner,
   });
 
   // Audit log

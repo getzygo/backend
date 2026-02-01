@@ -26,7 +26,7 @@ import {
   unlinkSocialLogin,
   getUserSocialLogins,
 } from '../../services/user.service';
-import { getUserTenants, createTenant, isSlugAvailable } from '../../services/tenant.service';
+import { getUserTenants, createTenant, isSlugAvailable, getTenantMembershipWithRole } from '../../services/tenant.service';
 import { checkVerificationStatus } from '../../services/verification.service';
 import { signInWithPassword, getSession } from '../../services/supabase.service';
 import { signupWithOAuth } from '../../services/signup.service';
@@ -258,7 +258,9 @@ app.post('/signin', async (c) => {
 
       // Determine redirect
       if (userTenants.length === 1) {
-        const tenant = userTenants[0].tenant;
+        const tenantMembership = userTenants[0];
+        const tenant = tenantMembership.tenant;
+        const role = tenantMembership.role;
         const verificationStatus = await checkVerificationStatus(user, tenant.id);
 
         response.current_tenant = {
@@ -279,6 +281,10 @@ app.post('/signin', async (c) => {
             lastName: user.lastName,
             avatarUrl: avatarUrl,
             emailVerifiedVia: user.emailVerifiedVia || provider,
+            roleId: role.id,
+            roleName: role.name,
+            roleSlug: role.slug,
+            isOwner: tenantMembership.isOwner,
           });
           response.redirect_url = `https://${tenant.slug}.zygo.tech?auth_token=${authToken}`;
         } else {
@@ -937,6 +943,10 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         lastName: existingUser.lastName,
         avatarUrl: avatarUrl,
         emailVerifiedVia: existingUser.emailVerifiedVia || provider,
+        roleId: tenantResult.ownerRole.id,
+        roleName: tenantResult.ownerRole.name,
+        roleSlug: tenantResult.ownerRole.slug,
+        isOwner: tenantResult.membership.isOwner,
       });
 
       return c.json(
@@ -1011,6 +1021,10 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       lastName: result.user.lastName,
       avatarUrl: avatarUrl,
       emailVerifiedVia: provider,
+      roleId: result.role.id,
+      roleName: result.role.name,
+      roleSlug: result.role.slug,
+      isOwner: true, // New signup = owner
     });
 
     return c.json(

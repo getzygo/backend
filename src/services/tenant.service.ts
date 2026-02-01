@@ -341,6 +341,36 @@ export async function getTenantMembership(
   return membership || null;
 }
 
+/**
+ * Get tenant membership with role details
+ */
+export async function getTenantMembershipWithRole(
+  userId: string,
+  tenantId: string
+): Promise<(TenantMember & { role: Role }) | null> {
+  const db = getDb();
+
+  const membership = await db.query.tenantMembers.findFirst({
+    where: and(
+      eq(tenantMembers.userId, userId),
+      eq(tenantMembers.tenantId, tenantId),
+      eq(tenantMembers.status, 'active')
+    ),
+    with: {
+      primaryRole: true,
+    },
+  });
+
+  if (!membership) {
+    return null;
+  }
+
+  return {
+    ...membership,
+    role: membership.primaryRole,
+  };
+}
+
 export const tenantService = {
   isValidSlug,
   isBlockedSlug,
@@ -355,4 +385,5 @@ export const tenantService = {
   isTenantMember,
   isTenantOwner,
   getTenantMembership,
+  getTenantMembershipWithRole,
 };

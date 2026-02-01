@@ -25,6 +25,11 @@ export interface AuthTokenPayload {
   lastName: string;
   avatarUrl?: string;
   emailVerifiedVia?: string | null;
+  // RBAC data
+  roleId: string;
+  roleName: string;
+  roleSlug: string;
+  isOwner: boolean;
   createdAt: number;
 }
 

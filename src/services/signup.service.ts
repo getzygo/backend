@@ -412,6 +412,7 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
     role: {
       id: result.ownerRole.id,
       name: result.ownerRole.name,
+      slug: result.ownerRole.slug,
       hierarchyLevel: result.ownerRole.hierarchyLevel,
       isProtected: result.ownerRole.isProtected,
     },
@@ -685,6 +686,7 @@ export async function signupWithOAuth(params: {
     role: {
       id: result.ownerRole.id,
       name: result.ownerRole.name,
+      slug: result.ownerRole.slug,
       hierarchyLevel: result.ownerRole.hierarchyLevel,
       isProtected: result.ownerRole.isProtected,
     },

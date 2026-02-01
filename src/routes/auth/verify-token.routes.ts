@@ -12,6 +12,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { verifyAuthToken } from '../../services/auth-token.service';
 import { getTenantById } from '../../services/tenant.service';
+import { resolvePermissions } from '../../services/permission.service';
 import { getDb } from '../../db/client';
 import { auditLogs } from '../../db/schema';
 
@@ -82,6 +83,9 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
 
   const db = getDb();
 
+  // Resolve user's permissions for this tenant
+  const permissions = await resolvePermissions(payload.userId, payload.tenantId);
+
   // Audit log
   await db.insert(auditLogs).values({
     userId: payload.userId,
@@ -90,13 +94,14 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
     resourceId: payload.tenantId,
     details: {
       tenant_slug: tenant.slug,
+      role_slug: payload.roleSlug,
     },
     ipAddress: ipAddress || undefined,
     userAgent: userAgent || undefined,
     status: 'success',
   });
 
-  // Return verified user and tenant info
+  // Return verified user, tenant, role, and permissions
   return c.json({
     verified: true,
     user: {
@@ -116,6 +121,13 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
       logoUrl: tenant.logoUrl,
       primaryColor: tenant.primaryColor,
     },
+    role: {
+      id: payload.roleId,
+      name: payload.roleName,
+      slug: payload.roleSlug,
+      isOwner: payload.isOwner,
+    },
+    permissions,
   });
 });
 
