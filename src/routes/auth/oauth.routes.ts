@@ -95,26 +95,219 @@ app.post('/callback', zValidator('json', callbackSchema), async (c) => {
   }
 });
 
-// OAuth signin schema
+// OAuth signin schema (for authorization code flow)
 const signinSchema = z.object({
   provider: z.enum(['google', 'github']),
   oauth_token: z.string().min(1, 'OAuth token is required'),
   tenant_slug: z.string().optional(),
 });
 
+// OAuth signin with Supabase token schema (for implicit flow)
+const signinWithSupabaseSchema = z.object({
+  provider: z.enum(['google', 'github']),
+  supabase_access_token: z.string().min(1, 'Supabase access token is required'),
+  email: z.string().email().optional(),
+});
+
 /**
  * POST /api/v1/auth/oauth/signin
  * OAuth signin for existing users
- * Per Section 10.1 - Auto-link for users without tenants, verify for users with tenants
+ * Supports both authorization code flow (oauth_token) and implicit flow (supabase_access_token)
  */
-app.post('/signin', zValidator('json', signinSchema), async (c) => {
-  const { provider, oauth_token, tenant_slug } = c.req.valid('json');
+app.post('/signin', async (c) => {
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
-
   const db = getDb();
 
   try {
+    const body = await c.req.json();
+
+    // Check if using Supabase access token (implicit flow from frontend)
+    if (body.supabase_access_token) {
+      const parsed = signinWithSupabaseSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          {
+            error: 'validation_error',
+            message: parsed.error.errors[0]?.message || 'Invalid request',
+          },
+          400
+        );
+      }
+
+      const { provider, supabase_access_token } = parsed.data;
+
+      // Verify token with Supabase and get user info
+      const { user: supabaseUser, error: sessionError } = await getSession(supabase_access_token);
+
+      if (sessionError || !supabaseUser) {
+        return c.json(
+          {
+            error: 'invalid_token',
+            message: sessionError || 'Invalid or expired access token',
+          },
+          401
+        );
+      }
+
+      const userEmail = supabaseUser.email;
+      if (!userEmail) {
+        return c.json(
+          {
+            error: 'no_email',
+            message: 'No email found in OAuth response',
+          },
+          400
+        );
+      }
+
+      // Check if user exists in our database
+      const user = await getUserByEmail(userEmail);
+
+      if (!user) {
+        return c.json(
+          {
+            success: false,
+            error: 'user_not_found',
+            message: 'No account found with this email. Please sign up first.',
+          },
+          404
+        );
+      }
+
+      // Check account status
+      if (user.status === 'suspended') {
+        return c.json(
+          {
+            success: false,
+            error: 'account_suspended',
+            message: 'Your account has been suspended. Please contact support.',
+          },
+          403
+        );
+      }
+
+      if (user.status === 'deleted') {
+        return c.json(
+          {
+            success: false,
+            error: 'account_deleted',
+            message: 'This account has been deleted.',
+          },
+          403
+        );
+      }
+
+      // Get user's tenants
+      const userTenants = await getUserTenants(user.id);
+
+      if (userTenants.length === 0) {
+        return c.json(
+          {
+            success: false,
+            error: 'no_tenants',
+            message: 'No workspaces found for this account. Please create a workspace first.',
+          },
+          404
+        );
+      }
+
+      // Update last login
+      await db
+        .update(users)
+        .set({
+          lastLoginAt: new Date(),
+          lastLoginIp: ipAddress || undefined,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, user.id));
+
+      // Audit log
+      await db.insert(auditLogs).values({
+        userId: user.id,
+        action: 'login_oauth',
+        resourceType: 'user',
+        resourceId: user.id,
+        details: {
+          provider,
+          tenant_count: userTenants.length,
+        },
+        ipAddress: ipAddress || undefined,
+        userAgent: userAgent || undefined,
+        status: 'success',
+      });
+
+      // Build response
+      const response: Record<string, unknown> = {
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          first_name: user.firstName,
+          last_name: user.lastName,
+          email_verified: user.emailVerified,
+          phone_verified: user.phoneVerified,
+          mfa_enabled: user.mfaEnabled,
+        },
+      };
+
+      // Determine redirect
+      if (userTenants.length === 1) {
+        const tenant = userTenants[0].tenant;
+        const verificationStatus = await checkVerificationStatus(user, tenant.id);
+
+        // Generate auth token for redirect
+        const authToken = Buffer.from(JSON.stringify({
+          userId: user.id,
+          tenantId: tenant.id,
+          exp: Date.now() + 60000, // 60 seconds
+        })).toString('base64url');
+
+        response.current_tenant = {
+          id: tenant.id,
+          name: tenant.name,
+          slug: tenant.slug,
+          type: tenant.type,
+          plan: tenant.plan,
+        };
+
+        response.redirect_url = verificationStatus.complete
+          ? `https://${tenant.slug}.zygo.tech?auth_token=${authToken}`
+          : '/complete-profile';
+      } else {
+        // Multiple tenants - show picker
+        response.tenants = userTenants.map((m) => ({
+          id: m.tenant.id,
+          name: m.tenant.name,
+          slug: m.tenant.slug,
+          type: m.tenant.type,
+          plan: m.tenant.plan,
+          role: {
+            id: m.role.id,
+            name: m.role.name,
+          },
+          is_owner: m.isOwner,
+        }));
+        response.redirect_url = '/select-workspace';
+      }
+
+      return c.json(response);
+    }
+
+    // Fall back to authorization code flow (oauth_token)
+    const parsed = signinSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        {
+          error: 'validation_error',
+          message: parsed.error.errors[0]?.message || 'Invalid request',
+        },
+        400
+      );
+    }
+
+    const { provider, oauth_token } = parsed.data;
+
     // Get pending OAuth data
     const pendingSignup = await oauthService.getPendingSignup(oauth_token);
 
