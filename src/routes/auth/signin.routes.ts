@@ -335,13 +335,80 @@ const switchTenantSchema = z.object({
 /**
  * POST /api/v1/auth/switch-tenant
  * Switch to a different tenant workspace
- * Requires authenticated user
+ * Requires Supabase access token in Authorization header
+ * Uses email-based lookup to handle OAuth users with mismatched IDs
  */
-app.post('/switch-tenant', authMiddleware, zValidator('json', switchTenantSchema), async (c) => {
-  const user = c.get('user');
+app.post('/switch-tenant', zValidator('json', switchTenantSchema), async (c) => {
   const { tenant_slug } = c.req.valid('json');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
+
+  // Get and validate authorization header
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return c.json(
+      {
+        error: 'unauthorized',
+        message: 'Missing or invalid authorization header',
+      },
+      401
+    );
+  }
+
+  const token = authHeader.slice(7);
+
+  // Validate token with Supabase
+  const { getSession } = await import('../../services/supabase.service');
+  const sessionResult = await getSession(token);
+
+  if (sessionResult.error || !sessionResult.user) {
+    return c.json(
+      {
+        error: 'unauthorized',
+        message: sessionResult.error || 'Invalid or expired token',
+      },
+      401
+    );
+  }
+
+  const supabaseUser = sessionResult.user;
+  const userEmail = supabaseUser.email;
+
+  if (!userEmail) {
+    return c.json(
+      {
+        error: 'unauthorized',
+        message: 'No email found in token',
+      },
+      401
+    );
+  }
+
+  // Look up user by email (handles OAuth users with different IDs)
+  const user = await getUserByEmail(userEmail);
+
+  if (!user) {
+    return c.json(
+      {
+        error: 'user_not_found',
+        message: 'User not found',
+      },
+      404
+    );
+  }
+
+  // Check account status
+  if (user.status !== 'active') {
+    return c.json(
+      {
+        error: 'account_inactive',
+        message: user.status === 'suspended'
+          ? 'Your account has been suspended. Please contact support.'
+          : 'Your account is not active.',
+      },
+      403
+    );
+  }
 
   const db = getDb();
 
@@ -371,6 +438,10 @@ app.post('/switch-tenant', authMiddleware, zValidator('json', switchTenantSchema
     );
   }
 
+  // Get avatar from Supabase user metadata if not in our DB
+  const supabaseMeta = supabaseUser.user_metadata || {};
+  const avatarUrl = user.avatarUrl || supabaseMeta.avatar_url || supabaseMeta.picture;
+
   // Generate auth token for redirect
   const authToken = Buffer.from(JSON.stringify({
     userId: user.id,
@@ -378,7 +449,7 @@ app.post('/switch-tenant', authMiddleware, zValidator('json', switchTenantSchema
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
-    avatarUrl: user.avatarUrl,
+    avatarUrl: avatarUrl,
     emailVerifiedVia: user.emailVerifiedVia,
     exp: Date.now() + 120000, // 2 minutes
   })).toString('base64url');
