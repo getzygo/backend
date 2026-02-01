@@ -12,6 +12,7 @@ import verifyEmailRoutes from './verify-email.routes';
 import verifyPhoneRoutes from './verify-phone.routes';
 import mfaRoutes from './mfa.routes';
 import completeProfileRoutes from './complete-profile.routes';
+import passwordResetRoutes from './password-reset.routes';
 
 const app = new Hono();
 
@@ -56,5 +57,12 @@ app.route('/', completeProfileRoutes);
 // POST /api/v1/auth/oauth/callback
 // POST /api/v1/auth/signup/oauth
 app.route('/oauth', oauthRoutes);
+
+// Password reset routes
+// POST /api/v1/auth/forgot-password
+// POST /api/v1/auth/verify-reset-code
+// POST /api/v1/auth/reset-password
+// GET /api/v1/auth/reset-status
+app.route('/', passwordResetRoutes);
 
 export default app;

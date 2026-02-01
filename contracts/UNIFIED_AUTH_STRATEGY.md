@@ -1256,20 +1256,21 @@ ALTER TABLE users ADD COLUMN block_reason VARCHAR(50);
 ## 16. Implementation Checklist
 
 ### Phase 1: Core Auth
-- [ ] Signup with Owner role creation
-- [ ] Email verification (immediate)
-- [ ] Signin with verification check
-- [ ] Complete profile page
-- [ ] Phone verification (Twilio)
-- [ ] MFA setup (TOTP)
+- [x] Signup with Owner role creation
+- [x] Email verification (immediate)
+- [x] Signin with verification check
+- [x] Complete profile page
+- [x] Phone verification (Twilio)
+- [x] MFA setup (TOTP)
+- [x] Password reset (forgot-password, verify-code, reset-password)
 
 ### Phase 2: RBAC
-- [ ] Permission resolution with Redis cache
-- [ ] Immediate cache invalidation
-- [ ] Custom role CRUD
-- [ ] Owner role protection
-- [ ] Role assignment with hierarchy check
-- [ ] Secondary role assignment (time-limited)
+- [x] Permission resolution with Redis cache
+- [x] Immediate cache invalidation
+- [x] Custom role CRUD
+- [x] Owner role protection
+- [x] Role assignment with hierarchy check
+- [x] Secondary role assignment (time-limited)
 
 ### Phase 3: Multi-Tenant
 - [ ] Tenant picker

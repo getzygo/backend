@@ -6,6 +6,7 @@
 
 import { Hono } from 'hono';
 import authRoutes from './auth';
+import rolesRoutes from './roles';
 
 const app = new Hono();
 
@@ -66,5 +67,6 @@ app.get('/tenants/:slug/config', (c) => {
 
 // Mount route groups
 app.route('/auth', authRoutes);
+app.route('/roles', rolesRoutes);
 
 export default app;

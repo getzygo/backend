@@ -35,7 +35,12 @@ export const users = pgTable(
 
     // Phone
     phone: varchar('phone', { length: 20 }),
+    phoneCountryCode: varchar('phone_country_code', { length: 5 }),
     phoneVerified: boolean('phone_verified').notNull().default(false),
+
+    // Location
+    country: varchar('country', { length: 2 }), // ISO 3166-1 alpha-2
+    city: varchar('city', { length: 100 }),
 
     // Status
     status: varchar('status', { length: 20 }).notNull().default('active'),

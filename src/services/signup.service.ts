@@ -1,8 +1,14 @@
 /**
  * Signup Orchestration Service
  *
- * Handles the complete signup flow with tenant and owner role creation.
+ * Handles the complete onboarding wizard signup flow.
  * Per UNIFIED_AUTH_STRATEGY.md Section 5.1.
+ *
+ * Onboarding Steps:
+ * 1. Plan Selection (plan, billing_cycle, license_count)
+ * 2. User Details (name, phone, country, city)
+ * 3. Company Details (company_name, industry, company_size) - skippable for Core plan
+ * 4. Workspace Setup (subdomain, compliance_requirements)
  */
 
 import { eq } from 'drizzle-orm';
@@ -19,32 +25,83 @@ import {
   type User,
   type Tenant,
   type Role,
-  type TenantSecurityConfig,
 } from '../db/schema';
 import { hashPassword, getUserByEmail } from './user.service';
 import { sendVerificationEmail } from './email.service';
-import { cachePermissions, ALL_PERMISSIONS } from './permission.service';
+import { cachePermissions } from './permission.service';
 
 // Trial period in days
 const TRIAL_PERIOD_DAYS = 14;
 
+// Plan types
+export type PlanType = 'core' | 'flow' | 'scale' | 'enterprise';
+export type BillingCycle = 'monthly' | 'annual';
+export type IndustryType = 'technology' | 'finance' | 'healthcare' | 'manufacturing' | 'retail' | 'other';
+export type CompanySizeType = '1-10' | '11-50' | '51-200' | '201-500' | '500+';
+export type ComplianceType = 'GDPR' | 'HIPAA' | 'SOC2' | 'PCI-DSS' | 'ISO27001';
+
+/**
+ * Complete onboarding signup parameters
+ */
 export interface SignupParams {
+  // Step 1: Plan Selection
+  plan: PlanType;
+  billingCycle: BillingCycle;
+  licenseCount?: number; // Required for non-core plans
+
+  // Step 2: User Details
   email: string;
   password: string;
-  firstName?: string;
-  lastName?: string;
-  tenantName: string;
-  tenantSlug: string;
-  tenantType: 'personal' | 'organization';
+  firstName: string;
+  lastName: string;
+  phone: string;
+  phoneCountryCode: string;
+  country: string; // ISO 3166-1 alpha-2
+  city: string;
+
+  // Step 3: Company Details (optional for Core plan)
+  companyName?: string;
+  industry?: IndustryType;
+  companySize?: CompanySizeType;
+
+  // Step 4: Workspace Setup
+  workspaceName: string;
+  workspaceSubdomain: string;
+  complianceRequirements?: ComplianceType[];
+
+  // Legal & Meta
+  termsAccepted: boolean;
   termsVersion?: string;
   ipAddress?: string;
   userAgent?: string;
 }
 
 export interface SignupResult {
-  user: Pick<User, 'id' | 'email' | 'firstName' | 'lastName' | 'emailVerified' | 'phoneVerified' | 'mfaEnabled'>;
-  tenant: Pick<Tenant, 'id' | 'name' | 'slug' | 'type' | 'plan' | 'trialExpiresAt'>;
-  role: Pick<Role, 'id' | 'name' | 'hierarchyLevel' | 'isProtected'>;
+  user: {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    emailVerified: boolean;
+    phoneVerified: boolean;
+    mfaEnabled: boolean;
+  };
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+    type: string;
+    plan: string;
+    billingCycle: string | null;
+    licenseCount: number | null;
+    trialExpiresAt: Date | null;
+  };
+  role: {
+    id: string;
+    name: string;
+    hierarchyLevel: number;
+    isProtected: boolean;
+  };
   requiresEmailVerification: boolean;
   verificationEmailSent: boolean;
   redirectUrl: string;
@@ -66,40 +123,114 @@ function isReservedSlug(slug: string): boolean {
     'api', 'app', 'www', 'admin', 'help', 'support', 'blog', 'docs',
     'status', 'mail', 'ftp', 'ssh', 'test', 'dev', 'staging', 'prod',
     'production', 'zygo', 'auth', 'login', 'signup', 'register',
-    'account', 'settings', 'billing', 'dashboard',
+    'account', 'settings', 'billing', 'dashboard', 'demo', 'trial',
   ];
   return reserved.includes(slug.toLowerCase());
 }
 
 /**
- * Complete signup flow
+ * Validate compliance requirements
+ */
+function isValidCompliance(compliance: string[]): boolean {
+  const valid: ComplianceType[] = ['GDPR', 'HIPAA', 'SOC2', 'PCI-DSS', 'ISO27001'];
+  return compliance.every((c) => valid.includes(c as ComplianceType));
+}
+
+/**
+ * Determine tenant type based on plan
+ * Core plan = personal (single user)
+ * All other plans = organization
+ */
+function getTenantType(plan: PlanType): 'personal' | 'organization' {
+  return plan === 'core' ? 'personal' : 'organization';
+}
+
+/**
+ * Get default license count based on plan
+ */
+function getDefaultLicenseCount(plan: PlanType): number {
+  switch (plan) {
+    case 'core':
+      return 1; // Core is single user
+    case 'flow':
+      return 5;
+    case 'scale':
+      return 10;
+    case 'enterprise':
+      return 50;
+    default:
+      return 1;
+  }
+}
+
+/**
+ * Complete signup flow for onboarding wizard
  * Creates user, tenant, owner role, and sends verification email
  */
 export async function signup(params: SignupParams): Promise<SignupResult> {
   const {
+    // Step 1: Plan
+    plan,
+    billingCycle,
+    licenseCount,
+
+    // Step 2: User Details
     email,
     password,
     firstName,
     lastName,
-    tenantName,
-    tenantSlug,
-    tenantType,
+    phone,
+    phoneCountryCode,
+    country,
+    city,
+
+    // Step 3: Company Details
+    companyName,
+    industry,
+    companySize,
+
+    // Step 4: Workspace
+    workspaceName,
+    workspaceSubdomain,
+    complianceRequirements = [],
+
+    // Meta
+    termsAccepted,
     termsVersion = '1.0',
     ipAddress,
     userAgent,
   } = params;
 
-  const normalizedEmail = email.toLowerCase().trim();
-  const normalizedSlug = tenantSlug.toLowerCase().trim();
+  // Validate terms accepted
+  if (!termsAccepted) {
+    throw new Error('You must accept the terms of service');
+  }
 
-  // Validate inputs
+  const normalizedEmail = email.toLowerCase().trim();
+  const normalizedSlug = workspaceSubdomain.toLowerCase().trim();
+
+  // Validate slug
   if (!isValidSlug(normalizedSlug)) {
-    throw new Error('Invalid tenant slug format. Use lowercase letters, numbers, and hyphens.');
+    throw new Error('Invalid workspace URL format. Use lowercase letters, numbers, and hyphens.');
   }
 
   if (isReservedSlug(normalizedSlug)) {
     throw new Error('This workspace URL is reserved. Please choose another.');
   }
+
+  // Validate compliance requirements
+  if (complianceRequirements.length > 0 && !isValidCompliance(complianceRequirements)) {
+    throw new Error('Invalid compliance requirement specified');
+  }
+
+  // Validate company details for non-core plans
+  const tenantType = getTenantType(plan);
+  if (tenantType === 'organization' && !companyName) {
+    throw new Error('Company name is required for organization plans');
+  }
+
+  // Get license count
+  const finalLicenseCount = plan === 'core' ? 1 : (licenseCount || getDefaultLicenseCount(plan));
 
   const db = getDb();
 
@@ -119,7 +250,7 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
     throw new Error('This workspace URL is already taken');
   }
 
-  // Hash password for storage (no Supabase Auth - direct database auth)
+  // Hash password
   const passwordHash = await hashPassword(password);
 
   const now = new Date();
@@ -128,17 +259,21 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
 
   // Create everything in a transaction
   const result = await db.transaction(async (tx) => {
-    // 1. Create user (email_verified=false)
+    // 1. Create user with all details from Step 2
     const [user] = await tx
       .insert(users)
       .values({
-        // Let database generate the UUID
         email: normalizedEmail,
         emailVerified: false,
         passwordHash,
         firstName,
         lastName,
-        displayName: firstName && lastName ? `${firstName} ${lastName}` : firstName || undefined,
+        displayName: `${firstName} ${lastName}`.trim(),
+        phone,
+        phoneCountryCode,
+        phoneVerified: false,
+        country,
+        city,
         status: 'active',
         termsAcceptedAt: now,
         termsVersion,
@@ -148,14 +283,22 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
       })
       .returning();
 
-    // 2. Create tenant
+    // 2. Create tenant with all details from Steps 1, 3, 4
     const [tenant] = await tx
       .insert(tenants)
       .values({
-        name: tenantName,
+        name: workspaceName,
         slug: normalizedSlug,
         type: tenantType,
-        plan: 'free',
+        // Company details (Step 3)
+        industry: tenantType === 'organization' ? industry : null,
+        companySize: tenantType === 'organization' ? companySize : null,
+        // Compliance (Step 4)
+        complianceRequirements: complianceRequirements,
+        // Subscription (Step 1)
+        plan,
+        billingCycle,
+        licenseCount: finalLicenseCount,
         trialExpiresAt,
         subscriptionStatus: 'trialing',
         status: 'active',
@@ -163,16 +306,25 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
       .returning();
 
     // 3. Create tenant security config with defaults
-    const [securityConfig] = await tx
-      .insert(tenantSecurityConfig)
-      .values({
-        tenantId: tenant.id,
-        requirePhoneVerification: true,
-        requireMfa: true,
-        phoneVerificationDeadlineDays: 3,
-        mfaDeadlineDays: 7,
-      })
-      .returning();
+    // Adjust requirements based on compliance
+    const requiresStrictSecurity = complianceRequirements.some((c) =>
+      ['HIPAA', 'SOC2', 'PCI-DSS'].includes(c)
+    );
+
+    await tx.insert(tenantSecurityConfig).values({
+      tenantId: tenant.id,
+      requirePhoneVerification: true,
+      requireMfa: requiresStrictSecurity ? true : true, // Always require MFA
+      phoneVerificationDeadlineDays: requiresStrictSecurity ? 1 : 3,
+      mfaDeadlineDays: requiresStrictSecurity ? 3 : 7,
+      // Stricter password policy for compliance
+      passwordMinLength: requiresStrictSecurity ? 14 : 12,
+      passwordRequireUppercase: true,
+      passwordRequireLowercase: true,
+      passwordRequireNumbers: true,
+      passwordRequireSymbols: true,
+      passwordExpiryDays: requiresStrictSecurity ? 90 : null,
+    });
 
     // 4. Create OWNER role (protected, all permissions)
     const [ownerRole] = await tx
@@ -213,7 +365,7 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
       joinedAt: now,
     });
 
-    // 7. Create audit log
+    // 7. Create audit log with full onboarding details
     await tx.insert(auditLogs).values({
       userId: user.id,
       action: 'signup',
@@ -223,6 +375,15 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
         email: normalizedEmail,
         tenantId: tenant.id,
         tenantSlug: normalizedSlug,
+        plan,
+        billingCycle,
+        licenseCount: finalLicenseCount,
+        tenantType,
+        industry: industry || null,
+        companySize: companySize || null,
+        complianceRequirements,
+        country,
+        city,
       },
       ipAddress,
       userAgent,
@@ -262,6 +423,8 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
       slug: result.tenant.slug,
       type: result.tenant.type,
       plan: result.tenant.plan,
+      billingCycle: result.tenant.billingCycle,
+      licenseCount: result.tenant.licenseCount,
       trialExpiresAt: result.tenant.trialExpiresAt,
     },
     role: {
@@ -278,43 +441,89 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
 
 /**
  * Signup with OAuth (email already verified)
+ * Still requires completing the onboarding wizard steps
  */
 export async function signupWithOAuth(params: {
-  email: string;
-  provider: 'google' | 'github';
+  // OAuth data
+  provider: 'google' | 'github' | 'microsoft' | 'apple';
   providerUserId: string;
+  email: string;
   firstName?: string;
   lastName?: string;
-  tenantName: string;
-  tenantSlug: string;
-  tenantType: 'personal' | 'organization';
+
+  // Step 1: Plan
+  plan: PlanType;
+  billingCycle: BillingCycle;
+  licenseCount?: number;
+
+  // Step 2: User Details (partially from OAuth)
+  phone: string;
+  phoneCountryCode: string;
+  country: string;
+  city: string;
+
+  // Step 3: Company Details
+  companyName?: string;
+  industry?: IndustryType;
+  companySize?: CompanySizeType;
+
+  // Step 4: Workspace
+  workspaceName: string;
+  workspaceSubdomain: string;
+  complianceRequirements?: ComplianceType[];
+
+  // Meta
+  termsAccepted: boolean;
   ipAddress?: string;
   userAgent?: string;
 }): Promise<SignupResult> {
   const {
-    email,
     provider,
     providerUserId,
+    email,
     firstName,
     lastName,
-    tenantName,
-    tenantSlug,
-    tenantType,
+    plan,
+    billingCycle,
+    licenseCount,
+    phone,
+    phoneCountryCode,
+    country,
+    city,
+    companyName,
+    industry,
+    companySize,
+    workspaceName,
+    workspaceSubdomain,
+    complianceRequirements = [],
+    termsAccepted,
     ipAddress,
     userAgent,
   } = params;
 
-  const normalizedEmail = email.toLowerCase().trim();
-  const normalizedSlug = tenantSlug.toLowerCase().trim();
+  if (!termsAccepted) {
+    throw new Error('You must accept the terms of service');
+  }
 
-  // Validate inputs
+  const normalizedEmail = email.toLowerCase().trim();
+  const normalizedSlug = workspaceSubdomain.toLowerCase().trim();
+
+  // Validate slug
   if (!isValidSlug(normalizedSlug)) {
-    throw new Error('Invalid tenant slug format');
+    throw new Error('Invalid workspace URL format');
   }
 
   if (isReservedSlug(normalizedSlug)) {
     throw new Error('This workspace URL is reserved');
   }
+
+  // Validate company details for non-core plans
+  const tenantType = getTenantType(plan);
+  if (tenantType === 'organization' && !companyName) {
+    throw new Error('Company name is required for organization plans');
+  }
+
+  const finalLicenseCount = plan === 'core' ? 1 : (licenseCount || getDefaultLicenseCount(plan));
 
   const db = getDb();
 
@@ -347,9 +556,14 @@ export async function signupWithOAuth(params: {
         email: normalizedEmail,
         emailVerified: true, // OAuth verified the email
         passwordHash: '', // No password for OAuth users
-        firstName,
-        lastName,
+        firstName: firstName || null,
+        lastName: lastName || null,
         displayName: firstName && lastName ? `${firstName} ${lastName}` : firstName || undefined,
+        phone,
+        phoneCountryCode,
+        phoneVerified: false,
+        country,
+        city,
         status: 'active',
         termsAcceptedAt: now,
         termsVersion: '1.0',
@@ -359,13 +573,22 @@ export async function signupWithOAuth(params: {
       .returning();
 
     // 2. Create tenant
+    const requiresStrictSecurity = complianceRequirements.some((c) =>
+      ['HIPAA', 'SOC2', 'PCI-DSS'].includes(c)
+    );
+
     const [tenant] = await tx
       .insert(tenants)
       .values({
-        name: tenantName,
+        name: workspaceName,
         slug: normalizedSlug,
         type: tenantType,
-        plan: 'free',
+        industry: tenantType === 'organization' ? industry : null,
+        companySize: tenantType === 'organization' ? companySize : null,
+        complianceRequirements,
+        plan,
+        billingCycle,
+        licenseCount: finalLicenseCount,
         trialExpiresAt,
         subscriptionStatus: 'trialing',
         status: 'active',
@@ -377,8 +600,14 @@ export async function signupWithOAuth(params: {
       tenantId: tenant.id,
       requirePhoneVerification: true,
       requireMfa: true,
-      phoneVerificationDeadlineDays: 3,
-      mfaDeadlineDays: 7,
+      phoneVerificationDeadlineDays: requiresStrictSecurity ? 1 : 3,
+      mfaDeadlineDays: requiresStrictSecurity ? 3 : 7,
+      passwordMinLength: requiresStrictSecurity ? 14 : 12,
+      passwordRequireUppercase: true,
+      passwordRequireLowercase: true,
+      passwordRequireNumbers: true,
+      passwordRequireSymbols: true,
+      passwordExpiryDays: requiresStrictSecurity ? 90 : null,
     });
 
     // 4. Create OWNER role
@@ -431,6 +660,15 @@ export async function signupWithOAuth(params: {
         provider,
         tenantId: tenant.id,
         tenantSlug: normalizedSlug,
+        plan,
+        billingCycle,
+        licenseCount: finalLicenseCount,
+        tenantType,
+        industry: industry || null,
+        companySize: companySize || null,
+        complianceRequirements,
+        country,
+        city,
       },
       ipAddress,
       userAgent,
@@ -460,6 +698,8 @@ export async function signupWithOAuth(params: {
       slug: result.tenant.slug,
       type: result.tenant.type,
       plan: result.tenant.plan,
+      billingCycle: result.tenant.billingCycle,
+      licenseCount: result.tenant.licenseCount,
       trialExpiresAt: result.tenant.trialExpiresAt,
     },
     role: {
@@ -470,7 +710,7 @@ export async function signupWithOAuth(params: {
     },
     requiresEmailVerification: false, // OAuth users are already verified
     verificationEmailSent: false,
-    redirectUrl: '/complete-profile',
+    redirectUrl: '/complete-profile', // Go to phone verification
   };
 }
 

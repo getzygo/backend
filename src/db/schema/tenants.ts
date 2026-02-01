@@ -33,9 +33,22 @@ export const tenants = pgTable(
     type: varchar('type', { length: 20 }).notNull().default('organization'),
     // 'personal' | 'organization'
 
+    // Company details (for organization type)
+    industry: varchar('industry', { length: 50 }),
+    // 'technology' | 'finance' | 'healthcare' | 'manufacturing' | 'retail' | 'other'
+    companySize: varchar('company_size', { length: 20 }),
+    // '1-10' | '11-50' | '51-200' | '201-500' | '500+'
+
+    // Compliance requirements
+    complianceRequirements: jsonb('compliance_requirements').default([]),
+    // ['GDPR', 'HIPAA', 'SOC2', 'PCI-DSS', 'ISO27001']
+
     // Subscription
-    plan: varchar('plan', { length: 20 }).notNull().default('free'),
-    // 'free' | 'starter' | 'professional' | 'enterprise'
+    plan: varchar('plan', { length: 20 }).notNull().default('core'),
+    // 'core' | 'flow' | 'scale' | 'enterprise'
+    billingCycle: varchar('billing_cycle', { length: 10 }).default('monthly'),
+    // 'monthly' | 'annual'
+    licenseCount: integer('license_count').default(1),
     trialExpiresAt: timestamp('trial_expires_at', { withTimezone: true }),
     subscriptionId: varchar('subscription_id', { length: 100 }),
     subscriptionStatus: varchar('subscription_status', { length: 20 }).default('trialing'),
