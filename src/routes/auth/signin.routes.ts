@@ -16,6 +16,7 @@ import { checkVerificationStatus } from '../../services/verification.service';
 import { mfaService } from '../../services/mfa.service';
 import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
+import { authMiddleware } from '../../middleware/auth.middleware';
 
 const app = new Hono();
 
@@ -324,6 +325,89 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
   }
 
   return c.json(response);
+});
+
+// Switch tenant request schema
+const switchTenantSchema = z.object({
+  tenant_slug: z.string().min(1, 'Tenant slug is required'),
+});
+
+/**
+ * POST /api/v1/auth/switch-tenant
+ * Switch to a different tenant workspace
+ * Requires authenticated user
+ */
+app.post('/switch-tenant', authMiddleware, zValidator('json', switchTenantSchema), async (c) => {
+  const user = c.get('user');
+  const { tenant_slug } = c.req.valid('json');
+  const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const userAgent = c.req.header('user-agent');
+
+  const db = getDb();
+
+  // Get target tenant
+  const tenant = await getTenantBySlug(tenant_slug);
+
+  if (!tenant) {
+    return c.json(
+      {
+        error: 'tenant_not_found',
+        message: 'Workspace not found',
+      },
+      404
+    );
+  }
+
+  // Verify user is a member of the target tenant
+  const isMember = await isTenantMember(user.id, tenant.id);
+
+  if (!isMember) {
+    return c.json(
+      {
+        error: 'not_a_member',
+        message: 'You are not a member of this workspace',
+      },
+      403
+    );
+  }
+
+  // Generate auth token for redirect
+  const authToken = Buffer.from(JSON.stringify({
+    userId: user.id,
+    tenantId: tenant.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    avatarUrl: user.avatarUrl,
+    emailVerifiedVia: user.emailVerifiedVia,
+    exp: Date.now() + 120000, // 2 minutes
+  })).toString('base64url');
+
+  // Audit log
+  await db.insert(auditLogs).values({
+    userId: user.id,
+    action: 'tenant_switch',
+    resourceType: 'tenant',
+    resourceId: tenant.id,
+    details: {
+      from_tenant: c.req.header('x-zygo-tenant-slug'),
+      to_tenant: tenant_slug,
+    },
+    ipAddress: ipAddress || undefined,
+    userAgent: userAgent || undefined,
+    status: 'success',
+  });
+
+  return c.json({
+    auth_token: authToken,
+    tenant: {
+      id: tenant.id,
+      name: tenant.name,
+      slug: tenant.slug,
+      type: tenant.type,
+      plan: tenant.plan,
+    },
+  });
 });
 
 /**
