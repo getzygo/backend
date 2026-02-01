@@ -1283,9 +1283,9 @@ ALTER TABLE users ADD COLUMN block_reason VARCHAR(50);
 - [x] Auto-link for users without tenants (automatic in /oauth/signin)
 
 ### Phase 5: Enterprise
-- [ ] SAML/OIDC configuration
-- [ ] Domain claiming
-- [ ] Admin panel (email + MFA only)
+- [x] SAML/OIDC configuration (GET/PUT/DELETE /api/v1/tenants/:id/sso)
+- [x] Domain claiming (GET/POST/DELETE /api/v1/tenants/:id/domains)
+- [x] Admin panel (email + MFA only) (/api/v1/admin/auth/*)
 
 ---
 

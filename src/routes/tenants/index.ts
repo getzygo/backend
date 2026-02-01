@@ -2,6 +2,7 @@
  * Tenant Routes
  *
  * Phase 3: Multi-Tenant Management
+ * Phase 5: Enterprise Features (SSO, Domain Claiming)
  *
  * GET /api/v1/tenants - List user's tenants (tenant picker)
  * POST /api/v1/tenants/switch - Switch to a different tenant
@@ -9,7 +10,19 @@
  * GET /api/v1/tenants/:tenantId/security-config - Get security config
  * PATCH /api/v1/tenants/:tenantId/security-config - Update security config
  *
- * Per UNIFIED_AUTH_STRATEGY.md Section 7.
+ * SSO Routes (Enterprise):
+ * GET /api/v1/tenants/:tenantId/sso - Get SSO config
+ * PUT /api/v1/tenants/:tenantId/sso - Configure SSO
+ * DELETE /api/v1/tenants/:tenantId/sso - Disable SSO
+ * POST /api/v1/tenants/:tenantId/sso/test - Test SSO config
+ *
+ * Domain Routes (Enterprise):
+ * GET /api/v1/tenants/:tenantId/domains - List claimed domains
+ * POST /api/v1/tenants/:tenantId/domains - Claim domain
+ * DELETE /api/v1/tenants/:tenantId/domains/:domain - Release domain
+ * POST /api/v1/tenants/:tenantId/domains/:domain/verify - Verify domain
+ *
+ * Per UNIFIED_AUTH_STRATEGY.md Sections 7, 11, 14.
  */
 
 import { Hono } from 'hono';
@@ -17,6 +30,8 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { tenantMiddleware, requireTenantMembership } from '../../middleware/tenant.middleware';
+import ssoRoutes from './sso.routes';
+import domainsRoutes from './domains.routes';
 import {
   getUserTenants,
   getTenantById,
@@ -443,5 +458,11 @@ app.patch(
     });
   }
 );
+
+// Mount SSO routes (Enterprise)
+app.route('/', ssoRoutes);
+
+// Mount Domain routes (Enterprise)
+app.route('/', domainsRoutes);
 
 export default app;
