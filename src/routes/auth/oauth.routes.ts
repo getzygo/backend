@@ -268,6 +268,7 @@ app.post('/signin', async (c) => {
           firstName: user.firstName,
           lastName: user.lastName,
           avatarUrl: avatarUrl,
+          emailVerifiedVia: user.emailVerifiedVia || provider,
           exp: Date.now() + 120000, // 2 minutes
         })).toString('base64url');
 
@@ -934,6 +935,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         firstName: existingUser.firstName,
         lastName: existingUser.lastName,
         avatarUrl: avatarUrl,
+        emailVerifiedVia: existingUser.emailVerifiedVia || provider,
         exp: Date.now() + 120000, // 2 minutes
       })).toString('base64url');
 
@@ -1009,6 +1011,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       firstName: result.user.firstName,
       lastName: result.user.lastName,
       avatarUrl: avatarUrl,
+      emailVerifiedVia: provider,
       exp: Date.now() + 120000, // 2 minutes
     })).toString('base64url');
 
