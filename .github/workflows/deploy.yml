@@ -49,16 +49,9 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             cd /opt/zygo/backend
-            export CI=true
-            npm ci
-
-            # Apply database schema (non-interactive mode)
-            npm run db:push
-
-            # Apply RLS functions and policies (idempotent)
-            npm run db:apply-rls
+            npm ci --production
 
             # Restart service (seeds permissions on startup if needed)
             pm2 restart zygo-api
             pm2 save
-            echo "Backend deployed and database updated successfully"
+            echo "Backend deployed successfully"
