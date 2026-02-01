@@ -9,6 +9,7 @@ import { loadEnv } from './config/env';
 import { app } from './app';
 import { getDb, closeDb } from './db/client';
 import { getRedis, closeRedis } from './db/redis';
+import { initializeDatabase } from './scripts/init';
 
 // Load and validate environment variables
 const env = loadEnv();
@@ -25,6 +26,9 @@ async function initializeConnections() {
     console.log('Connecting to database...');
     getDb();
     console.log('Database connected');
+
+    // Initialize database (seed if needed)
+    await initializeDatabase();
   } catch (error) {
     console.error('Failed to connect to database:', error);
     process.exit(1);
