@@ -4,6 +4,9 @@
  * Starts the Hono server with all configured routes and middleware.
  */
 
+// Load environment variables first
+import 'dotenv/config';
+
 import { serve } from '@hono/node-server';
 import { loadEnv } from './config/env';
 import { app } from './app';
