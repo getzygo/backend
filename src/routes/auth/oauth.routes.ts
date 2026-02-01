@@ -268,7 +268,7 @@ app.post('/signin', async (c) => {
           firstName: user.firstName,
           lastName: user.lastName,
           avatarUrl: avatarUrl,
-          exp: Date.now() + 300000, // 5 minutes
+          exp: Date.now() + 120000, // 2 minutes
         })).toString('base64url');
 
         response.current_tenant = {
@@ -931,7 +931,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
     const authToken = Buffer.from(JSON.stringify({
       userId: result.user.id,
       tenantId: result.tenant.id,
-      exp: Date.now() + 300000, // 5 minutes
+      exp: Date.now() + 120000, // 2 minutes
     })).toString('base64url');
 
     return c.json(

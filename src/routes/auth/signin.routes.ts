@@ -255,7 +255,7 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
   const authToken = Buffer.from(JSON.stringify({
     userId: user.id,
     tenantId: targetTenant?.id,
-    exp: Date.now() + 300000, // 5 minutes
+    exp: Date.now() + 120000, // 2 minutes
   })).toString('base64url');
 
   // Determine redirect URL
