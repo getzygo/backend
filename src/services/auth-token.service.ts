@@ -21,9 +21,9 @@ export interface AuthTokenPayload {
   userId: string;
   tenantId: string;
   email: string;
-  firstName: string;
-  lastName: string;
-  avatarUrl?: string;
+  firstName: string | null;
+  lastName: string | null;
+  avatarUrl?: string | null;
   emailVerifiedVia?: string | null;
   // RBAC data
   roleId: string;

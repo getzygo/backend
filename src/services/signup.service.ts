@@ -100,6 +100,7 @@ export interface SignupResult {
   role: {
     id: string;
     name: string;
+    slug: string;
     hierarchyLevel: number;
     isProtected: boolean;
   };
