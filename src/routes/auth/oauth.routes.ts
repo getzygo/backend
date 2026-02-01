@@ -26,7 +26,7 @@ import {
   unlinkSocialLogin,
   getUserSocialLogins,
 } from '../../services/user.service';
-import { getUserTenants } from '../../services/tenant.service';
+import { getUserTenants, createTenant, isSlugAvailable } from '../../services/tenant.service';
 import { checkVerificationStatus } from '../../services/verification.service';
 import { signInWithPassword, getSession } from '../../services/supabase.service';
 import { signupWithOAuth } from '../../services/signup.service';
@@ -870,19 +870,66 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
 
     // Check if user already exists in our database
     const existingUser = await getUserByEmail(supabaseUser.email!);
+
+    // If user exists, create a new tenant for them instead of erroring
     if (existingUser) {
-      // User exists - check if they have a tenant
-      const userTenants = await getUserTenants(existingUser.id);
-      if (userTenants.length > 0) {
+      // Check if the requested slug is available
+      const slugAvailable = await isSlugAvailable(body.workspace_subdomain);
+      if (!slugAvailable) {
         return c.json(
           {
-            error: 'user_exists',
-            message: 'An account with this email already exists',
-            redirect_url: `https://${userTenants[0].tenant.slug}.zygo.tech`,
+            error: 'slug_unavailable',
+            message: 'This workspace URL is already taken. Please choose a different subdomain.',
           },
           409
         );
       }
+
+      // Derive workspace name from subdomain if not provided
+      const workspaceName = body.workspace_name ||
+        body.workspace_subdomain.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+      // Create a new tenant for the existing user
+      const tenantResult = await createTenant({
+        name: workspaceName,
+        slug: body.workspace_subdomain,
+        type: body.plan === 'core' ? 'personal' : 'organization',
+        ownerUserId: existingUser.id,
+      });
+
+      if (!tenantResult) {
+        return c.json(
+          {
+            error: 'tenant_creation_failed',
+            message: 'Failed to create workspace',
+          },
+          500
+        );
+      }
+
+      // Generate auth token for the new tenant
+      const authToken = Buffer.from(JSON.stringify({
+        userId: existingUser.id,
+        tenantId: tenantResult.tenant.id,
+        exp: Date.now() + 120000, // 2 minutes
+      })).toString('base64url');
+
+      return c.json(
+        {
+          success: true,
+          user: {
+            id: existingUser.id,
+            email: existingUser.email,
+            firstName: existingUser.firstName,
+            lastName: existingUser.lastName,
+          },
+          tenant: tenantResult.tenant,
+          role: tenantResult.ownerRole,
+          auth_token: authToken,
+          redirect_url: `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`,
+        },
+        201
+      );
     }
 
     // Extract name from OAuth profile if not provided
