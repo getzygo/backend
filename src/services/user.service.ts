@@ -124,6 +124,7 @@ export async function createUserWithOAuth(params: {
   const newUser: NewUser = {
     email: email.toLowerCase(),
     emailVerified: true, // OAuth verified the email
+    emailVerifiedVia: provider, // Track which provider verified the email
     passwordHash,
     firstName,
     lastName,
@@ -331,13 +332,14 @@ export async function linkSocialLogin(params: {
 
 /**
  * Unlink an OAuth provider from a user
+ * If the provider was used to verify the email, resets email verification
  */
 export async function unlinkSocialLogin(params: {
   userId: string;
   provider: OAuthProvider;
   ipAddress?: string;
   userAgent?: string;
-}): Promise<void> {
+}): Promise<{ emailVerificationReset: boolean }> {
   const db = getDb();
   const { userId, provider, ipAddress, userAgent } = params;
 
@@ -347,6 +349,27 @@ export async function unlinkSocialLogin(params: {
 
   if (!socialLogin) {
     throw new Error(`No ${provider} account is linked`);
+  }
+
+  // Get user to check if email was verified via this provider
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { emailVerifiedVia: true },
+  });
+
+  let emailVerificationReset = false;
+
+  // If email was verified via this provider, reset verification
+  if (user?.emailVerifiedVia === provider) {
+    await db
+      .update(users)
+      .set({
+        emailVerified: false,
+        emailVerifiedVia: null,
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, userId));
+    emailVerificationReset = true;
   }
 
   // Delete the social login
@@ -362,6 +385,7 @@ export async function unlinkSocialLogin(params: {
     resourceId: provider,
     details: {
       provider,
+      emailVerificationReset,
     },
     ipAddress,
     userAgent,
@@ -369,6 +393,8 @@ export async function unlinkSocialLogin(params: {
   };
 
   await db.insert(auditLogs).values(auditLog);
+
+  return { emailVerificationReset };
 }
 
 /**

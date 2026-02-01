@@ -760,7 +760,7 @@ app.delete('/providers/:provider', authMiddleware, async (c) => {
   }
 
   try {
-    await unlinkSocialLogin({
+    const result = await unlinkSocialLogin({
       userId: user.id,
       provider,
       ipAddress: ipAddress || undefined,
@@ -769,7 +769,10 @@ app.delete('/providers/:provider', authMiddleware, async (c) => {
 
     return c.json({
       success: true,
-      message: `${provider} account unlinked successfully.`,
+      message: result.emailVerificationReset
+        ? `${provider} account unlinked. Your email is no longer verified - please verify it again.`
+        : `${provider} account unlinked successfully.`,
+      email_verification_reset: result.emailVerificationReset,
     });
   } catch (error) {
     console.error('Unlink OAuth provider error:', error);

@@ -94,6 +94,7 @@ const profileHandler = async (c: any) => {
       avatar_url: user.avatarUrl,
       phone: user.phone,
       email_verified: user.emailVerified,
+      email_verified_via: user.emailVerifiedVia, // 'email', 'google', 'github', or null
       phone_verified: user.phoneVerified,
       mfa_enabled: user.mfaEnabled,
       status: user.status,

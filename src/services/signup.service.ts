@@ -534,6 +534,7 @@ export async function signupWithOAuth(params: {
       .values({
         email: normalizedEmail,
         emailVerified: true, // OAuth verified the email
+        emailVerifiedVia: provider, // Track which provider verified the email
         passwordHash: '', // No password for OAuth users
         firstName: firstName || null,
         lastName: lastName || null,

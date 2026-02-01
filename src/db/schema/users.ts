@@ -25,6 +25,7 @@ export const users = pgTable(
     // Authentication
     email: varchar('email', { length: 255 }).notNull().unique(),
     emailVerified: boolean('email_verified').notNull().default(false),
+    emailVerifiedVia: varchar('email_verified_via', { length: 20 }), // 'email', 'google', 'github', null
     passwordHash: text('password_hash').notNull(),
 
     // Profile
