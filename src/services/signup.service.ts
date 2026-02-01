@@ -423,7 +423,7 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
 
 /**
  * Signup with OAuth (email already verified)
- * Still requires completing the onboarding wizard steps
+ * Simplified flow - only requires workspace subdomain and plan
  */
 export async function signupWithOAuth(params: {
   // OAuth data
@@ -438,13 +438,13 @@ export async function signupWithOAuth(params: {
   billingCycle: BillingCycle;
   licenseCount?: number;
 
-  // Step 2: User Details (partially from OAuth)
-  phone: string;
-  phoneCountryCode: string;
-  country: string;
-  city: string;
+  // Step 2: User Details (optional - can be filled later)
+  phone?: string;
+  phoneCountryCode?: string;
+  country?: string;
+  city?: string;
 
-  // Step 3: Company Details
+  // Step 3: Company Details (optional)
   companyName?: string;
   industry?: IndustryType;
   companySize?: CompanySizeType;
@@ -499,11 +499,8 @@ export async function signupWithOAuth(params: {
     throw new Error('This workspace URL is reserved');
   }
 
-  // Validate company details for non-core plans
+  // Determine tenant type based on plan
   const tenantType = getTenantType(plan);
-  if (tenantType === 'organization' && !companyName) {
-    throw new Error('Company name is required for organization plans');
-  }
 
   const finalLicenseCount = plan === 'core' ? 1 : (licenseCount || getDefaultLicenseCount(plan));
 
@@ -541,11 +538,11 @@ export async function signupWithOAuth(params: {
         firstName: firstName || null,
         lastName: lastName || null,
         displayName: firstName && lastName ? `${firstName} ${lastName}` : firstName || undefined,
-        phone,
-        phoneCountryCode,
+        phone: phone || null,
+        phoneCountryCode: phoneCountryCode || null,
         phoneVerified: false,
-        country,
-        city,
+        country: country || null,
+        city: city || null,
         status: 'active',
         termsAcceptedAt: now,
         termsVersion: '1.0',

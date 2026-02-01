@@ -788,36 +788,34 @@ app.delete('/providers/:provider', authMiddleware, async (c) => {
 // Complete signup schema for OAuth users
 const completeSignupSchema = z.object({
   // Plan Selection
-  plan: z.enum(['core', 'flow', 'scale', 'enterprise']),
-  billing_cycle: z.enum(['monthly', 'annual']),
+  plan: z.enum(['core', 'flow', 'scale', 'enterprise']).optional().default('core'),
+  billing_cycle: z.enum(['monthly', 'annual']).optional().default('monthly'),
   license_count: z.number().int().min(1).max(1000).optional(),
 
-  // User Details (partial - some come from OAuth)
-  first_name: z.string().min(1).max(100),
-  last_name: z.string().min(1).max(100),
-  phone: z.string().min(5).max(20),
-  phone_country_code: z.string().min(1).max(5),
-  country: z.string().length(2),
-  city: z.string().min(1).max(100),
+  // User Details (optional - can be derived from OAuth profile)
+  first_name: z.string().min(1).max(100).optional(),
+  last_name: z.string().min(1).max(100).optional(),
+  phone: z.string().min(5).max(20).optional(),
+  phone_country_code: z.string().min(1).max(5).optional(),
+  country: z.string().length(2).optional(),
+  city: z.string().min(1).max(100).optional(),
 
-  // Company Details (optional for Core plan)
+  // Company Details (optional)
   company_name: z.string().min(2).max(200).optional(),
   industry: z.enum(['technology', 'finance', 'healthcare', 'manufacturing', 'retail', 'other']).optional(),
   company_size: z.enum(['1-10', '11-50', '51-200', '201-500', '500+']).optional(),
 
   // Workspace Setup
-  workspace_name: z.string().min(2).max(100),
+  workspace_name: z.string().min(2).max(100).optional(),
   workspace_subdomain: z
     .string()
     .min(3)
     .max(50)
     .regex(/^[a-z0-9]([a-z0-9-]{0,48}[a-z0-9])?$/),
-  compliance_requirements: z.array(z.enum(['GDPR', 'HIPAA', 'SOC2', 'PCI-DSS', 'ISO27001'])).optional().default([]),
+  compliance_requirements: z.array(z.enum(['GDPR', 'HIPAA', 'SOC2', 'PCI-DSS', 'ISO27001', 'CCPA', 'CPRA', 'APPI'])).optional().default([]),
 
-  // Legal
-  terms_accepted: z.boolean().refine((v) => v === true, {
-    message: 'You must accept the terms of service',
-  }),
+  // Legal (already accepted during initial OAuth signup)
+  terms_accepted: z.boolean().optional().default(true),
 });
 
 /**
@@ -887,13 +885,24 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       }
     }
 
+    // Extract name from OAuth profile if not provided
+    const userMeta = supabaseUser.user_metadata || {};
+    const fullName = userMeta.full_name || userMeta.name || '';
+    const nameParts = fullName.split(' ');
+    const derivedFirstName = nameParts[0] || 'User';
+    const derivedLastName = nameParts.slice(1).join(' ') || '';
+
+    // Derive workspace name from subdomain if not provided
+    const workspaceName = body.workspace_name ||
+      body.workspace_subdomain.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
     // Create user and tenant using signupWithOAuth
     const result = await signupWithOAuth({
       provider,
       providerUserId: supabaseUser.id,
       email: supabaseUser.email!,
-      firstName: body.first_name,
-      lastName: body.last_name,
+      firstName: body.first_name || derivedFirstName,
+      lastName: body.last_name || derivedLastName,
 
       plan: body.plan,
       billingCycle: body.billing_cycle,
@@ -908,11 +917,11 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       industry: body.industry,
       companySize: body.company_size,
 
-      workspaceName: body.workspace_name,
+      workspaceName: workspaceName,
       workspaceSubdomain: body.workspace_subdomain,
       complianceRequirements: body.compliance_requirements,
 
-      termsAccepted: body.terms_accepted,
+      termsAccepted: body.terms_accepted ?? true,
       ipAddress: ipAddress || undefined,
       userAgent: userAgent || undefined,
     });
