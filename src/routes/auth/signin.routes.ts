@@ -251,13 +251,20 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
     status: 'success',
   });
 
+  // Generate auth token for redirect
+  const authToken = Buffer.from(JSON.stringify({
+    userId: user.id,
+    tenantId: targetTenant?.id,
+    exp: Date.now() + 60000, // 60 seconds
+  })).toString('base64url');
+
   // Determine redirect URL
   let redirectUrl = '/select-workspace';
   if (targetTenant) {
     if (verificationStatus && !verificationStatus.complete) {
       redirectUrl = '/complete-profile';
     } else {
-      redirectUrl = `https://${targetTenant.slug}.zygo.tech`;
+      redirectUrl = `https://${targetTenant.slug}.zygo.tech?auth_token=${authToken}`;
     }
   }
 
