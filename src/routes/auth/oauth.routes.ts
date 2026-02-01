@@ -34,6 +34,7 @@ import { authMiddleware } from '../../middleware/auth.middleware';
 import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
 import type { User } from '../../db/schema';
+import { createAuthToken } from '../../services/auth-token.service';
 
 const app = new Hono();
 
@@ -260,18 +261,6 @@ app.post('/signin', async (c) => {
         const tenant = userTenants[0].tenant;
         const verificationStatus = await checkVerificationStatus(user, tenant.id);
 
-        // Generate auth token for redirect - include user info for the tenant app
-        const authToken = Buffer.from(JSON.stringify({
-          userId: user.id,
-          tenantId: tenant.id,
-          email: user.email,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          avatarUrl: avatarUrl,
-          emailVerifiedVia: user.emailVerifiedVia || provider,
-          exp: Date.now() + 120000, // 2 minutes
-        })).toString('base64url');
-
         response.current_tenant = {
           id: tenant.id,
           name: tenant.name,
@@ -280,9 +269,21 @@ app.post('/signin', async (c) => {
           plan: tenant.plan,
         };
 
-        response.redirect_url = verificationStatus.complete
-          ? `https://${tenant.slug}.zygo.tech?auth_token=${authToken}`
-          : '/complete-profile';
+        if (verificationStatus.complete) {
+          // Generate secure opaque auth token stored in Redis
+          const authToken = await createAuthToken({
+            userId: user.id,
+            tenantId: tenant.id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            avatarUrl: avatarUrl,
+            emailVerifiedVia: user.emailVerifiedVia || provider,
+          });
+          response.redirect_url = `https://${tenant.slug}.zygo.tech?auth_token=${authToken}`;
+        } else {
+          response.redirect_url = '/complete-profile';
+        }
       } else {
         // Multiple tenants - show picker
         response.tenants = userTenants.map((m) => ({
@@ -927,8 +928,8 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
           .where(eq(users.id, existingUser.id));
       }
 
-      // Generate auth token for the new tenant - include user profile data
-      const authToken = Buffer.from(JSON.stringify({
+      // Generate secure opaque auth token stored in Redis
+      const authToken = await createAuthToken({
         userId: existingUser.id,
         tenantId: tenantResult.tenant.id,
         email: existingUser.email,
@@ -936,8 +937,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         lastName: existingUser.lastName,
         avatarUrl: avatarUrl,
         emailVerifiedVia: existingUser.emailVerifiedVia || provider,
-        exp: Date.now() + 120000, // 2 minutes
-      })).toString('base64url');
+      });
 
       return c.json(
         {
@@ -1002,9 +1002,8 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
     // Get avatar from OAuth provider
     const avatarUrl = userMeta.avatar_url || userMeta.picture;
 
-    // Generate a short-lived auth token for redirect
-    // This token is passed in the URL and validated by the tenant app
-    const authToken = Buffer.from(JSON.stringify({
+    // Generate secure opaque auth token stored in Redis
+    const authToken = await createAuthToken({
       userId: result.user.id,
       tenantId: result.tenant.id,
       email: result.user.email,
@@ -1012,8 +1011,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       lastName: result.user.lastName,
       avatarUrl: avatarUrl,
       emailVerifiedVia: provider,
-      exp: Date.now() + 120000, // 2 minutes
-    })).toString('base64url');
+    });
 
     return c.json(
       {

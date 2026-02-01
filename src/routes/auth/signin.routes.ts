@@ -17,6 +17,7 @@ import { mfaService } from '../../services/mfa.service';
 import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
 import { authMiddleware } from '../../middleware/auth.middleware';
+import { createAuthToken } from '../../services/auth-token.service';
 
 const app = new Hono();
 
@@ -252,19 +253,22 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
     status: 'success',
   });
 
-  // Generate auth token for redirect
-  const authToken = Buffer.from(JSON.stringify({
-    userId: user.id,
-    tenantId: targetTenant?.id,
-    exp: Date.now() + 120000, // 2 minutes
-  })).toString('base64url');
-
   // Determine redirect URL
   let redirectUrl = '/select-workspace';
   if (targetTenant) {
     if (verificationStatus && !verificationStatus.complete) {
       redirectUrl = '/complete-profile';
     } else {
+      // Generate secure opaque auth token stored in Redis
+      const authToken = await createAuthToken({
+        userId: user.id,
+        tenantId: targetTenant.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        avatarUrl: user.avatarUrl || undefined,
+        emailVerifiedVia: user.emailVerifiedVia,
+      });
       redirectUrl = `https://${targetTenant.slug}.zygo.tech?auth_token=${authToken}`;
     }
   }
@@ -442,8 +446,8 @@ app.post('/switch-tenant', zValidator('json', switchTenantSchema), async (c) => 
   const supabaseMeta = supabaseUser.user_metadata || {};
   const avatarUrl = user.avatarUrl || supabaseMeta.avatar_url || supabaseMeta.picture;
 
-  // Generate auth token for redirect
-  const authToken = Buffer.from(JSON.stringify({
+  // Generate secure opaque auth token stored in Redis
+  const authToken = await createAuthToken({
     userId: user.id,
     tenantId: tenant.id,
     email: user.email,
@@ -451,8 +455,7 @@ app.post('/switch-tenant', zValidator('json', switchTenantSchema), async (c) => 
     lastName: user.lastName,
     avatarUrl: avatarUrl,
     emailVerifiedVia: user.emailVerifiedVia,
-    exp: Date.now() + 120000, // 2 minutes
-  })).toString('base64url');
+  });
 
   // Audit log
   await db.insert(auditLogs).values({

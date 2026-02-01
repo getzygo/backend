@@ -81,6 +81,9 @@ export const REDIS_KEYS = {
 
   /** Tenant config cache: tenant_config:{tenantId} */
   TENANT_CONFIG: 'tenant_config:',
+
+  /** Auth token for cross-domain redirect: auth_token:{token} */
+  AUTH_TOKEN: 'auth_token:',
 } as const;
 
 /**
@@ -119,4 +122,7 @@ export const REDIS_TTL = {
 
   /** Cache default: 1 hour */
   CACHE_DEFAULT: 60 * 60,
+
+  /** Auth token for cross-domain redirect: 2 minutes */
+  AUTH_TOKEN: 2 * 60,
 } as const;

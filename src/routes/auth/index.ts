@@ -14,6 +14,7 @@ import verifyPhoneRoutes from './verify-phone.routes';
 import mfaRoutes from './mfa.routes';
 import completeProfileRoutes from './complete-profile.routes';
 import passwordResetRoutes from './password-reset.routes';
+import verifyTokenRoutes from './verify-token.routes';
 
 const app = new Hono();
 
@@ -74,5 +75,9 @@ app.route('/signup', oauthLegacyRoutes);
 // POST /api/v1/auth/reset-password
 // GET /api/v1/auth/reset-status
 app.route('/', passwordResetRoutes);
+
+// Token verification routes (for cross-domain auth)
+// POST /api/v1/auth/verify-token
+app.route('/verify-token', verifyTokenRoutes);
 
 export default app;
