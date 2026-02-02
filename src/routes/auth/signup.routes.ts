@@ -18,6 +18,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { signup } from '../../services/signup.service';
+import { createAuthToken } from '../../services/auth-token.service';
 
 const app = new Hono();
 
@@ -130,6 +131,25 @@ app.post('/', zValidator('json', signupSchema), async (c) => {
       userAgent: userAgent || undefined,
     });
 
+    // Create auth token for redirect to tenant app
+    const authToken = await createAuthToken({
+      userId: result.user.id,
+      tenantId: result.tenant.id,
+      email: result.user.email,
+      firstName: result.user.firstName,
+      lastName: result.user.lastName,
+      avatarUrl: undefined,
+      emailVerified: result.user.emailVerified,
+      emailVerifiedVia: undefined,
+      roleId: result.role.id,
+      roleName: result.role.name,
+      roleSlug: result.role.slug,
+      isOwner: true,
+    });
+
+    // Build redirect URL with auth token
+    const redirectUrl = `https://${result.tenant.slug}.zygo.tech?auth_token=${authToken}`;
+
     return c.json({
       user: {
         id: result.user.id,
@@ -158,7 +178,7 @@ app.post('/', zValidator('json', signupSchema), async (c) => {
       },
       requires_email_verification: result.requiresEmailVerification,
       verification_email_sent: result.verificationEmailSent,
-      redirect_url: result.redirectUrl,
+      redirect_url: redirectUrl,
     }, 201);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Signup failed';
