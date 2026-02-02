@@ -110,6 +110,7 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
       firstName: payload.firstName,
       lastName: payload.lastName,
       avatarUrl: payload.avatarUrl,
+      emailVerified: payload.emailVerified,
       emailVerifiedVia: payload.emailVerifiedVia,
     },
     tenant: {

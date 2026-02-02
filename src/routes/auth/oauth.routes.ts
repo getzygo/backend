@@ -280,6 +280,7 @@ app.post('/signin', async (c) => {
             firstName: user.firstName,
             lastName: user.lastName,
             avatarUrl: avatarUrl,
+            emailVerified: user.emailVerified,
             emailVerifiedVia: user.emailVerifiedVia || provider,
             roleId: role.id,
             roleName: role.name,
@@ -942,6 +943,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         firstName: existingUser.firstName,
         lastName: existingUser.lastName,
         avatarUrl: avatarUrl,
+        emailVerified: existingUser.emailVerified,
         emailVerifiedVia: existingUser.emailVerifiedVia || provider,
         roleId: tenantResult.ownerRole.id,
         roleName: tenantResult.ownerRole.name,
@@ -1030,6 +1032,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       firstName: result.user.firstName,
       lastName: result.user.lastName,
       avatarUrl: avatarUrl,
+      emailVerified: result.user.emailVerified, // OAuth users are email-verified
       emailVerifiedVia: provider,
       roleId: result.role.id,
       roleName: result.role.name,
