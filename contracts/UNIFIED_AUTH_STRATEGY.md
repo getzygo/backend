@@ -1,8 +1,8 @@
 # Zygo Unified Authentication & RBAC Strategy
 
-**Version:** 1.0.0
-**Last Updated:** January 2026
-**Status:** Implementation Guide
+**Version:** 2.0.0
+**Last Updated:** February 2, 2026
+**Status:** Production Implementation
 **Related Docs:** [AUTHENTICATION.md](./AUTHENTICATION.md), [rbac_contract.md](./rbac_contract.md), [TENANCY.md](./TENANCY.md)
 
 ---
@@ -11,40 +11,50 @@
 
 1. [Overview](#1-overview)
 2. [Core Principles](#2-core-principles)
-3. [Verification Requirements](#3-verification-requirements)
-4. [URL Structure & Entry Points](#4-url-structure--entry-points)
-5. [Unified Signup Flow](#5-unified-signup-flow)
-6. [Unified Signin Flow](#6-unified-signin-flow)
-7. [Multi-Tenant User Management](#7-multi-tenant-user-management)
-8. [RBAC System](#8-rbac-system)
-9. [Permission Resolution & Caching](#9-permission-resolution--caching)
-10. [Account Linking Strategy](#10-account-linking-strategy)
-11. [Domain Claiming (Enterprise)](#11-domain-claiming-enterprise)
-12. [Free Trial & Billing Rules](#12-free-trial--billing-rules)
-13. [Tenant Types](#13-tenant-types)
-14. [Admin Panel Authentication](#14-admin-panel-authentication)
-15. [Database Schema](#15-database-schema)
-16. [Implementation Checklist](#16-implementation-checklist)
+3. [Cross-Domain Authentication](#3-cross-domain-authentication)
+4. [Unified Signup Flow](#4-unified-signup-flow)
+5. [Unified Signin Flow](#5-unified-signin-flow)
+6. [OAuth Authentication](#6-oauth-authentication)
+7. [Password Reset Flow](#7-password-reset-flow)
+8. [Verification Requirements](#8-verification-requirements)
+9. [Multi-Tenant User Management](#9-multi-tenant-user-management)
+10. [Tenant Switching](#10-tenant-switching)
+11. [RBAC System](#11-rbac-system)
+12. [Permission Resolution & Caching](#12-permission-resolution--caching)
+13. [Account Linking Strategy](#13-account-linking-strategy)
+14. [Session Management](#14-session-management)
+15. [Admin Panel Authentication](#15-admin-panel-authentication)
+16. [API Endpoints Reference](#16-api-endpoints-reference)
+17. [Implementation Checklist](#17-implementation-checklist)
 
 ---
 
 ## 1. Overview
 
-This document defines the **unified authentication, verification, and RBAC strategy** for Zygo's multi-tenant platform.
+This document defines the **unified authentication, cross-domain token exchange, and RBAC strategy** for Zygo's multi-tenant platform.
 
 ### Key Architecture Decisions
 
 | Aspect | Decision |
 |--------|----------|
-| **Auth Provider** | Supabase Auth (GoTrue) |
+| **Auth Provider** | Supabase Auth (GoTrue) for identity + Custom auth tokens for cross-domain |
 | **Identity** | Email is unique identifier across platform |
 | **Multi-Tenant** | One user can belong to multiple tenants |
+| **Cross-Domain Auth** | Opaque auth tokens stored in Redis (2 min TTL, single-use) |
+| **Session Storage** | Supabase tokens in sessionStorage + tenant data in tenantStorage |
+| **Tenant Isolation** | Tenant memberships cached at login, no cross-tenant API calls |
 | **Role Model** | Primary role (required) + Secondary roles (optional, time-limited) |
 | **Owner Role** | Auto-created on signup, **PROTECTED** (cannot modify/delete) |
-| **Custom Roles** | Unlimited per tenant, fully editable |
-| **Permission Merge** | Union (OR) - all permissions from all roles |
 | **Permission Cache** | Redis, 5 min TTL, **immediate invalidation** on changes |
-| **Verification** | Email (immediate) + Phone (3 days) + MFA (7 days) |
+
+### Domain Architecture
+
+| Domain | Purpose |
+|--------|---------|
+| `getzygo.com` | Public landing, auth pages (login, signup, password reset) |
+| `api.zygo.tech` | Backend API |
+| `{tenant}.zygo.tech` | Tenant workspace apps |
+| `admin.zygo.tech` | Global admin panel |
 
 ---
 
@@ -56,10 +66,11 @@ This document defines the **unified authentication, verification, and RBAC strat
 |------|-------------|
 | **Email = Identity** | Email is the unique identifier across the platform |
 | **Multi-Tenant** | One user (email) can belong to multiple tenants |
+| **Tenant Isolation** | Each tenant app only knows about its own data |
+| **Cached Memberships** | Tenant list cached at login, no API calls to fetch other tenants |
+| **Cross-Domain Tokens** | Single-use, 2-minute TTL, stored in Redis |
 | **Trial Per Tenant** | 14-day trial is per tenant, not per user |
-| **Tenant Picker** | Multi-tenant users see workspace selector on login |
-| **Scoped Access** | Login from `{tenant}.zygo.tech` requires membership - **non-members REJECTED** |
-| **Verification Enforced** | Email, Phone, MFA must be completed per deadlines |
+| **Core Plan Limit** | One free (Core plan) workspace per user |
 
 ### 2.2 Authentication Methods
 
@@ -68,8 +79,8 @@ This document defines the **unified authentication, verification, and RBAC strat
 | Email/Password | Yes | Yes | Yes + MFA |
 | Google OAuth | Yes | Yes | **No** |
 | GitHub OAuth | Yes | Yes | **No** |
-| Microsoft OAuth | Yes | Yes | **No** |
-| Apple OAuth | Yes | Yes | **No** |
+| Microsoft OAuth | Planned | Planned | **No** |
+| Apple OAuth | Planned | Planned | **No** |
 | SAML 2.0 | No | Yes* | **No** |
 | OIDC | No | Yes* | **No** |
 
@@ -77,324 +88,215 @@ This document defines the **unified authentication, verification, and RBAC strat
 
 ---
 
-## 3. Verification Requirements
+## 3. Cross-Domain Authentication
 
-### 3.1 Verification Deadlines
+### 3.1 The Problem
 
-| Verification | Deadline | Enforcement |
-|--------------|----------|-------------|
-| **Email** | Immediate | Cannot proceed to tenant without verified email |
-| **Phone (SMS)** | 3 days | After 3 days, redirect to `/complete-profile` |
-| **MFA (TOTP)** | 7 days | After 7 days, redirect to `/complete-profile` |
+Zygo uses separate domains for auth (`getzygo.com`) and tenant apps (`{tenant}.zygo.tech`). Cookies cannot be shared across these domains, so we need a secure way to transfer authentication.
 
-### 3.2 Phone Verification Configuration
-
-Phone verification requirement is **tenant configurable**:
-
-```typescript
-interface TenantSecurityConfig {
-  require_phone_verification: boolean;  // Default: true
-  require_mfa: boolean;                  // Default: true
-  phone_verification_deadline_days: number;  // Default: 3
-  mfa_deadline_days: number;             // Default: 7
-}
-```
-
-### 3.3 Verification Enforcement Flow
+### 3.2 The Solution: Auth Tokens
 
 ```
-User logs in successfully
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    CROSS-DOMAIN AUTHENTICATION FLOW                          │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+User logs in at getzygo.com
          │
          ▼
-┌─────────────────────────┐
-│ Check: Email verified?  │──── NO ───► Block login entirely
-└───────────┬─────────────┘             "Please verify your email first"
-            │ YES
-            ▼
-┌─────────────────────────┐
-│ Check: Phone required   │
-│ by tenant config?       │
-└───────────┬─────────────┘
-            │
-    ┌───────┴───────┐
-    │ YES           │ NO (skip)
-    ▼               │
-┌─────────────────┐ │
-│ Phone verified? │ │
-└───────┬─────────┘ │
-        │           │
-┌───────┴───────┐   │
-│ NO            │   │
-▼               │   │
-Account age     │   │
-> 3 days?       │   │
-    │           │   │
-┌───┴───┐       │   │
-│YES    │NO     │   │
-▼       ▼       ▼   │
-ENFORCE Allow   │   │
-        (grace) │   │
-            │   │   │
-            └───┴───┘
-                │
-                ▼
-┌─────────────────────────┐
-│ Check: MFA enabled?     │
-└───────────┬─────────────┘
-            │
-    ┌───────┴───────┐
-    │ NO            │ YES
-    ▼               ▼
-Account age     Continue to
-> 7 days?       tenant
-    │
-┌───┴───┐
-│YES    │NO
-▼       ▼
-ENFORCE Allow
-        (grace)
-
-
-ENFORCE = Redirect to /complete-profile
-          User cannot access tenant until verified
-```
-
-### 3.4 Complete Profile Page
-
-When verification is incomplete and deadline passed:
-
-```
+┌─────────────────────┐
+│ 1. Authenticate     │
+│    with Supabase    │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 2. Backend creates  │
+│    auth token in    │     ┌─────────────────────────────────────────┐
+│    Redis with:      │     │  AuthTokenPayload in Redis:             │
+│    - userId         │     │  {                                      │
+│    - tenantId       │     │    userId, tenantId, email,             │
+│    - roleInfo       │     │    firstName, lastName, avatarUrl,      │
+│    - permissions    │     │    emailVerified, emailVerifiedVia,     │
+│    - supabaseTokens │     │    roleId, roleName, roleSlug, isOwner, │
+│    - memberships    │     │    supabaseAccessToken,                 │
+└──────────┬──────────┘     │    supabaseRefreshToken,                │
+           │                │    tenantMemberships: [...],            │
+           │                │    createdAt                            │
+           │                │  }                                      │
+           │                │  TTL: 2 minutes, Single-use             │
+           ▼                └─────────────────────────────────────────┘
+┌─────────────────────┐
+│ 3. Redirect to      │
+│    tenant app with  │
+│    ?auth_token=xxx  │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 4. Tenant app calls │
+│    POST /verify-    │
+│    token            │
+└──────────┬──────────┘
+           │
+           ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                              │
-│                       Complete Your Profile                                  │
-│                                                                              │
-│  To continue using Zygo, please complete the following:                     │
-│                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────┐     │
-│  │  ✅  Email Verified                                                │     │
-│  │      john@example.com                                              │     │
-│  └────────────────────────────────────────────────────────────────────┘     │
-│                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────┐     │
-│  │  ⚠️  Phone Verification Required                                   │     │
-│  │                                                                    │     │
-│  │      [  +1 (___) ___-____  ]                                      │     │
-│  │                                                                    │     │
-│  │      [Send Verification Code]                                      │     │
-│  └────────────────────────────────────────────────────────────────────┘     │
-│                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────┐     │
-│  │  ⚠️  Two-Factor Authentication Required                            │     │
-│  │                                                                    │     │
-│  │      Scan QR code with authenticator app                          │     │
-│  │                                                                    │     │
-│  │      [QR CODE]                                                    │     │
-│  │                                                                    │     │
-│  │      Or enter manually: XXXX-XXXX-XXXX-XXXX                       │     │
-│  │                                                                    │     │
-│  │      Verify: [______]  [Confirm]                                  │     │
-│  └────────────────────────────────────────────────────────────────────┘     │
-│                                                                              │
-│  [Log out]                                                                   │
-│                                                                              │
+│ 5. Backend verifies & DELETES token (single-use)                            │
+│    Returns: user, tenant, role, permissions, session, tenantMemberships     │
 └─────────────────────────────────────────────────────────────────────────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ 6. Frontend stores: │
+│    - sessionStorage │
+│      (access_token) │
+│    - tenantStorage  │
+│      (memberships)  │
+└─────────────────────┘
 ```
 
-### 3.5 Implementation
+### 3.3 Auth Token Service Implementation
 
 ```typescript
-// Middleware to enforce verification
-async function enforceVerification(c: Context, next: Next) {
-  const session = c.get('session');
-  const user = session.user;
-  const tenant = session.tenant;
-  const tenantConfig = await getTenantSecurityConfig(tenant.id);
+// src/services/auth-token.service.ts
 
-  const accountAgeDays = daysSince(user.createdAt);
-  const missing: string[] = [];
-
-  // Email - always required immediately
-  if (!user.emailVerified) {
-    throw new AuthError('EMAIL_NOT_VERIFIED', 'Please verify your email address');
-  }
-
-  // Phone - if required by tenant and deadline passed
-  if (tenantConfig.require_phone_verification) {
-    if (!user.phoneVerified && accountAgeDays > tenantConfig.phone_verification_deadline_days) {
-      missing.push('phone');
-    }
-  }
-
-  // MFA - deadline passed
-  if (!user.mfaEnabled && accountAgeDays > tenantConfig.mfa_deadline_days) {
-    missing.push('mfa');
-  }
-
-  if (missing.length > 0) {
-    throw new VerificationRequiredError({
-      missing,
-      redirect: '/complete-profile',
-      message: `Please complete verification: ${missing.join(', ')}`
-    });
-  }
-
-  await next();
+export interface TenantMembership {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  role: { id: string; name: string; };
+  isOwner: boolean;
 }
+
+export interface AuthTokenPayload {
+  userId: string;
+  tenantId: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  avatarUrl?: string | null;
+  emailVerified: boolean;
+  emailVerifiedVia?: string | null;
+  roleId: string;
+  roleName: string;
+  roleSlug: string;
+  isOwner: boolean;
+  supabaseAccessToken?: string;
+  supabaseRefreshToken?: string;
+  tenantMemberships?: TenantMembership[];  // Cached at login
+  createdAt: number;
+}
+
+// Create token (stores in Redis with 2 min TTL)
+async function createAuthToken(payload: Omit<AuthTokenPayload, 'createdAt'>): Promise<string>
+
+// Verify and consume token (single-use, deletes from Redis)
+async function verifyAuthToken(token: string): Promise<AuthTokenPayload | null>
 ```
+
+### 3.4 Security Properties
+
+| Property | Implementation |
+|----------|---------------|
+| **Unpredictable** | 32 bytes of cryptographically random data (base64url encoded) |
+| **Short-lived** | 2 minute TTL in Redis |
+| **Single-use** | Token is deleted atomically during verification |
+| **Server-validated** | Token must exist in Redis; no client-side validation |
+| **Contains no secrets** | Token is opaque; all data stored server-side |
 
 ---
 
-## 4. URL Structure & Entry Points
+## 4. Unified Signup Flow
 
-### 4.1 Domain Map
-
-| URL | Purpose |
-|-----|---------|
-| `getzygo.com/signup` | New account + tenant creation |
-| `getzygo.com/login` | Global login → Tenant picker |
-| `getzygo.com/select-workspace` | Tenant picker |
-| `getzygo.com/complete-profile` | Verification enforcement |
-| `{tenant}.zygo.tech/login` | Tenant-specific login (members only) |
-| `admin.zygo.tech/login` | Global admin (email + MFA only) |
-
-### 4.2 Entry Point Rules
+### 4.1 Onboarding Wizard Steps
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  getzygo.com/signup                                                          │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  • Creates NEW user account                                                 │
-│  • Creates NEW tenant with 14-day trial                                     │
-│  • Auto-creates PROTECTED "Owner" role (all 114 permissions)               │
-│  • Assigns user as Owner                                                    │
-│  • Sends email verification                                                 │
-│  • ERROR if email already exists → redirect to login                        │
-└─────────────────────────────────────────────────────────────────────────────┘
+Step 1: Plan Selection
+├── plan: core | flow | scale | enterprise
+├── billing_cycle: monthly | annual
+└── license_count (for paid plans)
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  getzygo.com/login                                                           │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  • Authenticates EXISTING user                                              │
-│  • Checks verification status → may redirect to /complete-profile           │
-│  • If 0 tenants → redirect to /create-workspace                             │
-│  • If 1+ tenants → show tenant picker                                       │
-└─────────────────────────────────────────────────────────────────────────────┘
+Step 2: User Details
+├── email, password
+├── first_name, last_name
+├── phone, phone_country_code
+├── country, city
 
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  {tenant}.zygo.tech/login                                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│  • Authenticates EXISTING user                                              │
-│  • MUST be member of THIS tenant → ERROR if not                             │
-│  • Checks verification against TENANT config                                │
-│  • SSO available if tenant configured                                       │
-└─────────────────────────────────────────────────────────────────────────────┘
+Step 3: Company Details (optional for Core plan)
+├── company_name
+├── industry
+└── company_size
+
+Step 4: Workspace Setup
+├── workspace_name
+├── workspace_subdomain
+└── compliance_requirements
 ```
 
----
-
-## 5. Unified Signup Flow
-
-### 5.1 Flow Diagram
+### 4.2 Signup Flow Diagram
 
 ```
-User initiates signup (Email or OAuth)
+User submits signup form at getzygo.com/signup
                     │
                     ▼
          ┌─────────────────────┐
-         │ Authenticate &      │
-         │ get email + name    │
+         │ POST /api/v1/auth/  │
+         │ signup              │
          └──────────┬──────────┘
                     │
-                    ▼
-         ┌─────────────────────┐
-         │ Email exists?       │──── YES ───► Error: "Account exists"
-         └──────────┬──────────┘              [Go to Login]
-                    │ NO
-                    ▼
-         ┌─────────────────────┐
-         │ Email blocked?      │──── YES ───► Error: "Cannot create"
-         │ (abandoned tenant)  │
+         ┌──────────┴──────────┐
+         │ Check if email      │──── EXISTS ───► Error: "Account exists"
+         │ already exists      │               [Redirect to /login]
          └──────────┬──────────┘
-                    │ NO
-                    ▼
-         ┌─────────────────────┐
-         │ Domain claimed?     │──── YES ───► Warning shown
-         └──────────┬──────────┘              (can still proceed)
-                    │
-                    ▼
-         ┌─────────────────────┐
-         │ Tenant Creation     │
-         │ Form:               │
-         │ • Workspace name    │
-         │ • URL slug          │
-         │ • Type: Personal/Org│
-         └──────────┬──────────┘
-                    │
+                    │ NEW
                     ▼
     ┌───────────────────────────────────────┐
     │           TRANSACTION                  │
     │                                        │
-    │  1. Create user (email_verified=false) │
-    │  2. Link OAuth (if applicable)         │
+    │  1. Create user in Supabase Auth       │
+    │     (email_confirm=true for OAuth)     │
+    │  2. Create user record in users table  │
     │  3. Create tenant                      │
     │  4. Create OWNER role (protected)      │
     │     - All 114 permissions              │
     │     - is_system = true                 │
     │     - is_protected = true              │
-    │  5. Assign user as Owner               │
-    │  6. Create tenant_config               │
-    │  7. Cache permissions in Redis         │
+    │  5. Create tenant_member (isOwner=true)│
+    │  6. Create audit log                   │
     │                                        │
     └───────────────────────────────────────┘
                     │
-                    ├──► Email: Verification link
-                    │
-                    ├──► Email: Welcome to Zygo
+                    ▼
+         ┌─────────────────────┐
+         │ Sign in with        │
+         │ Supabase to get     │
+         │ access/refresh      │
+         │ tokens              │
+         └──────────┬──────────┘
                     │
                     ▼
          ┌─────────────────────┐
-         │ Response:           │
-         │ requires_email_     │
-         │ verification: true  │
-         │                     │
-         │ Redirect to:        │
-         │ /verify-email       │
+         │ Create auth token   │
+         │ with:               │
+         │ - User info         │
+         │ - Tenant info       │
+         │ - Role info         │
+         │ - Supabase tokens   │
+         │ - tenantMemberships │
+         └──────────┬──────────┘
+                    │
+                    ▼
+         ┌─────────────────────┐
+         │ Return response:    │
+         │ redirect_url =      │
+         │ https://{slug}.     │
+         │ zygo.tech?auth_     │
+         │ token=xxx           │
          └─────────────────────┘
 ```
 
-### 5.2 Owner Role Creation
-
-```typescript
-async function createOwnerRole(tx: Transaction, tenantId: string): Promise<Role> {
-  // Get all 114 permissions
-  const allPermissions = await tx.query.permissions.findMany();
-
-  // Create protected Owner role
-  const [ownerRole] = await tx.insert(roles).values({
-    tenant_id: tenantId,
-    name: 'Owner',
-    slug: 'owner',
-    description: 'Full access to all features',
-    hierarchy_level: 1,
-    is_system: true,      // System-created
-    is_protected: true,   // Cannot be modified or deleted
-    created_by: null,     // System
-  }).returning();
-
-  // Assign all permissions
-  await tx.insert(rolePermissions).values(
-    allPermissions.map(p => ({
-      role_id: ownerRole.id,
-      permission_id: p.id,
-      tenant_id: tenantId,
-    }))
-  );
-
-  return ownerRole;
-}
-```
-
-### 5.3 Signup Response
+### 4.3 Signup Response
 
 ```typescript
 interface SignupResponse {
@@ -403,16 +305,17 @@ interface SignupResponse {
     email: string;
     first_name: string;
     last_name: string;
-    email_verified: false;  // Always false on signup
-    phone_verified: false;
-    mfa_enabled: false;
+    email_verified: boolean;
+    phone_verified: boolean;
+    mfa_enabled: boolean;
   };
   tenant: {
     id: string;
     name: string;
     slug: string;
     type: 'personal' | 'organization';
-    plan: 'free';
+    plan: 'core' | 'flow' | 'scale' | 'enterprise';
+    billing_cycle: 'monthly' | 'annual';
     trial_expires_at: string;
   };
   role: {
@@ -421,101 +324,354 @@ interface SignupResponse {
     hierarchy_level: 1;
     is_protected: true;
   };
-  requires_email_verification: true;
-  verification_email_sent: true;
-  redirect_url: '/verify-email';
+  requires_email_verification: boolean;
+  verification_email_sent: boolean;
+  redirect_url: string;  // https://{slug}.zygo.tech?auth_token=xxx
+}
+```
+
+### 4.4 Core Plan Limit Enforcement
+
+```typescript
+// Only one free (Core plan) workspace per user
+if (body.plan === 'core') {
+  const hasCore = await userHasCorePlanTenant(user.id);
+  if (hasCore) {
+    throw new Error('You can only have one free (Core) workspace. Please select a paid plan.');
+  }
 }
 ```
 
 ---
 
-## 6. Unified Signin Flow
+## 5. Unified Signin Flow
 
-### 6.1 Flow Diagram
+### 5.1 Flow Diagram
 
 ```
-User submits login
+User submits login at getzygo.com/login
          │
          ▼
 ┌─────────────────────┐
-│ Authenticate        │
+│ POST /api/v1/auth/  │
+│ signin              │
+│ {email, password,   │
+│  tenant_slug?,      │
+│  mfa_code?}         │
 └──────────┬──────────┘
            │
            ▼
 ┌─────────────────────┐
-│ User exists?        │──── NO ───► Error: "No account"
+│ User exists?        │──── NO ───► 401: "Invalid email or password"
 └──────────┬──────────┘
            │ YES
            ▼
 ┌─────────────────────┐
-│ Status = active?    │──── NO ───► Error (suspended/blocked)
+│ Account status?     │
+├──────────┬──────────┤
+│ suspended│  deleted │──────────► 403: Status error
+└──────────┴──────────┘
+           │ active
+           ▼
+┌─────────────────────┐
+│ Account locked?     │──── YES ──► 403: "Account locked for X minutes"
 └──────────┬──────────┘
-           │ YES
+           │ NO
            ▼
 ┌─────────────────────┐
-│ Email verified?     │──── NO ───► Error: "Verify email first"
-└──────────┬──────────┘             [Resend verification]
-           │ YES
+│ Verify password     │──── FAIL ──┬► Increment failed attempts
+└──────────┬──────────┘            │  If >= 5: Lock for 15 minutes
+           │ PASS                  │  Return 401: "Invalid credentials"
+           │                       └──────────────────────────────────
            ▼
 ┌─────────────────────┐
-│ MFA enabled?        │──── YES ──► MFA Challenge
-└──────────┬──────────┘
-           │ NO (or passed)
+│ MFA enabled?        │──── YES & no code ──► 403: "MFA required"
+└──────────┬──────────┘                       require_mfa_code: true
+           │ NO or code valid
            ▼
 ┌─────────────────────┐
-│ Entry point?        │
+│ Sign in with        │
+│ Supabase            │
 └──────────┬──────────┘
            │
-   ┌───────┴───────┐
-   │               │
-   ▼               ▼
-Tenant URL      Global URL
-   │               │
-   ▼               ▼
-┌───────────┐  ┌───────────┐
-│ Is member?│  │ Get       │
-│           │  │ tenants   │
-└─────┬─────┘  └─────┬─────┘
-      │              │
-  ┌───┴───┐    ┌─────┴─────┐
-  │       │    │           │
-  ▼ NO    ▼YES ▼ 0         ▼ 1+
-  │       │    │           │
-ERROR   Check  Redirect   Tenant
-"Not    verif  to create  Picker
-member" status workspace
-        │
-        ▼
-┌───────────────────┐
-│ Verification      │
-│ complete for      │
-│ this tenant?      │
-└─────────┬─────────┘
-          │
-  ┌───────┴───────┐
-  │               │
-  ▼ NO            ▼ YES
-  │               │
-Redirect to     Access
-/complete-      granted
-profile
+           ▼
+┌─────────────────────┐
+│ Reset failed        │
+│ attempts, update    │
+│ lastLoginAt         │
+└──────────┬──────────┘
+           │
+           ▼
+┌─────────────────────┐
+│ Get user's tenants  │
+└──────────┬──────────┘
+           │
+   ┌───────┴───────────────────────────────────┐
+   │ 0 tenants        │ 1 tenant    │ 2+ tenants │
+   ▼                  ▼             ▼            │
+Return:           Select auto    Return:        │
+redirect_url =    Check verif    tenants list   │
+/onboarding       status         redirect_url = │
+                      │          /select-       │
+                      ▼          workspace      │
+              ┌─────────────────┐               │
+              │ Verification    │               │
+              │ complete?       │               │
+              └───────┬─────────┘               │
+                  ┌───┴───┐                     │
+                  │ NO    │ YES                 │
+                  ▼       ▼                     │
+              redirect  Create auth             │
+              to /      token &                 │
+              complete- redirect to             │
+              profile   tenant app              │
 ```
 
-### 6.2 Verification Check Per Tenant
+### 5.2 Signin Response Variants
+
+**Single Tenant (auto-selected):**
+```typescript
+{
+  user: { id, email, first_name, last_name, email_verified, ... },
+  session: { access_token, refresh_token, expires_at },
+  current_tenant: { id, name, slug, type, plan },
+  verification_status: { complete: true, missing: [], deadlines: {} },
+  redirect_url: "https://{slug}.zygo.tech?auth_token=xxx"
+}
+```
+
+**Multiple Tenants (show picker):**
+```typescript
+{
+  user: { ... },
+  session: { ... },
+  tenants: [
+    { id, name, slug, type, plan, role: { id, name }, is_owner },
+    ...
+  ],
+  redirect_url: "/select-workspace"
+}
+```
+
+**No Tenants:**
+```typescript
+{
+  user: { ... },
+  session: { ... },
+  redirect_url: "/onboarding",
+  message: "Please create your first workspace"
+}
+```
+
+### 5.3 Account Lockout
 
 ```typescript
-async function checkVerificationStatus(
-  user: User,
-  tenantId: string
-): Promise<VerificationStatus> {
+const MAX_ATTEMPTS = 5;
+const LOCKOUT_MINUTES = 15;
+
+// On failed password attempt
+const attempts = parseInt(user.failedLoginAttempts || '0', 10) + 1;
+
+if (attempts >= MAX_ATTEMPTS) {
+  const lockUntil = new Date(Date.now() + LOCKOUT_MINUTES * 60 * 1000);
+  await db.update(users).set({
+    failedLoginAttempts: attempts.toString(),
+    lockedUntil: lockUntil,
+  }).where(eq(users.id, user.id));
+
+  // Audit log
+  await db.insert(auditLogs).values({
+    userId: user.id,
+    action: 'account_locked',
+    details: { reason: 'too_many_failed_attempts', attempts },
+  });
+
+  return { error: 'account_locked', message: 'Account locked for 15 minutes' };
+}
+```
+
+---
+
+## 6. OAuth Authentication
+
+### 6.1 Supported Providers
+
+| Provider | Status | Scopes |
+|----------|--------|--------|
+| Google | ✅ Active | openid, profile, email |
+| GitHub | ✅ Active | read:user, user:email |
+| Microsoft | 🔜 Planned | openid, profile, email |
+| Apple | 🔜 Planned | name, email |
+
+### 6.2 OAuth Flows
+
+**Flow 1: New User Signup via OAuth**
+```
+User clicks "Sign up with Google"
+         │
+         ▼
+Frontend redirects to Supabase OAuth
+         │
+         ▼
+User authenticates with Google
+         │
+         ▼
+Supabase callback returns to frontend
+         │
+         ▼
+Frontend has Supabase access_token
+         │
+         ▼
+POST /api/v1/auth/oauth/complete-signup
+{
+  workspace_subdomain: "acme",
+  plan: "core",
+  ...
+}
+Authorization: Bearer {supabase_access_token}
+         │
+         ▼
+Backend:
+1. Validates Supabase token
+2. Extracts email, name from token
+3. Creates user (email_verified=true via OAuth)
+4. Creates tenant
+5. Creates Owner role
+6. Returns auth_token redirect
+```
+
+**Flow 2: Existing User Signin via OAuth**
+```
+User clicks "Sign in with Google"
+         │
+         ▼
+Frontend redirects to Supabase OAuth
+         │
+         ▼
+User authenticates with Google
+         │
+         ▼
+Supabase callback returns to frontend
+         │
+         ▼
+POST /api/v1/auth/oauth/signin
+{
+  provider: "google",
+  supabase_access_token: "xxx"
+}
+         │
+         ▼
+Backend:
+1. Validates Supabase token
+2. Looks up user by email
+3. If no tenants: redirect to /create-workspace
+4. If 1 tenant: create auth_token, redirect
+5. If 2+ tenants: return tenant list
+```
+
+### 6.3 OAuth Account Linking
+
+When an OAuth user with existing tenants tries to link a new OAuth provider:
+
+```
+OAuth login, user exists, has tenants, OAuth not linked
+         │
+         ▼
+┌─────────────────────┐
+│ Require email       │
+│ verification        │
+│ (6-digit code)      │
+│ Max 3 attempts      │
+└──────────┬──────────┘
+         │
+         ├──── VALID ───► Link OAuth account
+         │
+         └──── INVALID (3x) ───► Block request
+```
+
+**Auto-Link Rule:** If user has no tenants, OAuth is auto-linked (no data at risk).
+
+---
+
+## 7. Password Reset Flow
+
+### 7.1 Three-Step Process
+
+```
+Step 1: POST /api/v1/auth/forgot-password
+{email}
+         │
+         ▼
+- Check user exists (don't reveal if not)
+- Rate limit: 3 requests per hour
+- Generate 6-digit code
+- Store in Redis (1 hour TTL)
+- Send email with code
+         │
+         ▼
+Response: { success: true, message: "If account exists, code sent" }
+
+
+Step 2: POST /api/v1/auth/verify-reset-code
+{email, code}
+         │
+         ▼
+- Check code exists in Redis
+- Max 5 attempts (then invalidate)
+- If valid: generate reset_token (32 chars)
+- Store reset_token in Redis (15 min TTL)
+- Delete the code
+         │
+         ▼
+Response: { success: true, reset_token: "xxx", expires_in: 900 }
+
+
+Step 3: POST /api/v1/auth/reset-password
+{email, reset_token, password}
+         │
+         ▼
+- Validate reset_token
+- Hash new password
+- Update in users table + Supabase Auth
+- Delete reset_token
+- Clear rate limits
+- Send confirmation email
+         │
+         ▼
+Response: { success: true, message: "Password reset successfully" }
+```
+
+### 7.2 Password Requirements
+
+```typescript
+const passwordSchema = z.string()
+  .min(12, 'Password must be at least 12 characters')
+  .regex(/[A-Z]/, 'Must contain at least one uppercase letter')
+  .regex(/[a-z]/, 'Must contain at least one lowercase letter')
+  .regex(/[0-9]/, 'Must contain at least one number')
+  .regex(/[^A-Za-z0-9]/, 'Must contain at least one special character');
+```
+
+---
+
+## 8. Verification Requirements
+
+### 8.1 Verification Deadlines
+
+| Verification | Deadline | Enforcement |
+|--------------|----------|-------------|
+| **Email** | Immediate | Cannot proceed without verified email |
+| **Phone (SMS)** | 3 days | After deadline, redirect to /complete-profile |
+| **MFA (TOTP)** | 7 days | After deadline, redirect to /complete-profile |
+
+### 8.2 Verification Status Check
+
+```typescript
+async function checkVerificationStatus(user: User, tenantId: string): Promise<VerificationStatus> {
   const config = await getTenantSecurityConfig(tenantId);
   const accountAgeDays = daysSince(user.createdAt);
 
-  const status: VerificationStatus = {
-    complete: true,
-    missing: [],
-    deadlines: {}
-  };
+  const status = { complete: true, missing: [], deadlines: {} };
 
   // Email - always required
   if (!user.emailVerified) {
@@ -549,94 +705,248 @@ async function checkVerificationStatus(
 }
 ```
 
+### 8.3 Phone Verification (Twilio SMS)
+
+```
+POST /api/v1/auth/verify-phone/send-code
+{phone, phone_country_code}
+         │
+         ▼
+- Format E.164: +{country_code}{phone}
+- Rate limit: 3 codes per hour
+- Generate 6-digit code
+- Store in Redis (10 min TTL)
+- Send via Twilio SMS
+         │
+         ▼
+POST /api/v1/auth/verify-phone
+{code}
+         │
+         ▼
+- Validate code (max 5 attempts)
+- Update user.phoneVerified = true
+- Audit log
+```
+
+### 8.4 MFA Setup (TOTP)
+
+```
+POST /api/v1/auth/mfa/setup
+         │
+         ▼
+- Generate TOTP secret (base32, 32 chars)
+- Store pending secret in Redis (10 min TTL)
+- Return: secret, otpauth_uri, qr_code (base64)
+         │
+         ▼
+POST /api/v1/auth/mfa/enable
+{code, backup_code_count: 10}
+         │
+         ▼
+- Verify TOTP code
+- Generate backup codes (10 codes)
+- Hash and store backup codes
+- Enable MFA on user
+- Return: backup_codes (display once)
+```
+
 ---
 
-## 7. Multi-Tenant User Management
+## 9. Multi-Tenant User Management
 
-### 7.1 Tenant Picker
+### 9.1 Tenant Isolation Principle
+
+**Critical:** Tenant apps must NOT make API calls to fetch other tenants' data.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Select your workspace                               │
+│  TENANT ISOLATION                                                            │
+├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────┐     │
-│  │  🏢  Acme Corporation                                              │     │
-│  │      acme.zygo.tech                                     [Open]     │     │
-│  │      Role: Admin • Organization                                    │     │
-│  └────────────────────────────────────────────────────────────────────┘     │
+│  ✅ CORRECT: Cache tenant memberships at login                              │
 │                                                                              │
-│  ┌────────────────────────────────────────────────────────────────────┐     │
-│  │  👤  John's Workspace                                              │     │
-│  │      john-doe.zygo.tech                                 [Open]     │     │
-│  │      Role: Owner • Personal                                        │     │
-│  └────────────────────────────────────────────────────────────────────┘     │
+│     Login Response → Auth Token → tenantMemberships cached                  │
+│                                   │                                          │
+│                                   ▼                                          │
+│     Tenant App stores in tenantStorage.set('tenant_memberships', [...])     │
+│                                   │                                          │
+│                                   ▼                                          │
+│     Tenant Switcher reads from tenantStorage (NO API CALL)                  │
 │                                                                              │
-│  ─────────────────────────────────────────────────────────────────────────  │
-│  Want to create a new workspace? [Go to getzygo.com/signup]                 │
-│  [Log out]                                                                   │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ❌ WRONG: Tenant app calls GET /api/v1/tenants                             │
+│                                                                              │
+│     This would:                                                              │
+│     - Return data about OTHER tenants                                        │
+│     - Violate tenant isolation                                               │
+│     - Allow cross-tenant data leakage                                        │
+│                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 7.2 Tenant Switching
+### 9.2 Tenant Memberships in Auth Token
 
 ```typescript
-// POST /api/v1/auth/switch-tenant
-async function switchTenant(c: Context) {
-  const { target_tenant_id } = await c.req.json();
-  const session = c.get('session');
+// When creating auth token, include all user's tenant memberships
+const userTenants = await getUserTenants(user.id);
+const tenantMemberships = userTenants.map((m) => ({
+  id: m.tenant.id,
+  name: m.tenant.name,
+  slug: m.tenant.slug,
+  plan: m.tenant.plan,
+  role: {
+    id: m.role.id,
+    name: m.role.name,
+  },
+  isOwner: m.isOwner,
+}));
 
-  // Verify membership
-  const membership = await db.query.tenantMembers.findFirst({
-    where: and(
-      eq(tenantMembers.userId, session.user.id),
-      eq(tenantMembers.tenantId, target_tenant_id),
-      eq(tenantMembers.status, 'active')
-    )
-  });
+const authToken = await createAuthToken({
+  userId: user.id,
+  tenantId: targetTenant.id,
+  // ... other fields
+  supabaseAccessToken: authResult.session.access_token,
+  supabaseRefreshToken: authResult.session.refresh_token,
+  tenantMemberships,  // ← Cached for tenant switcher
+});
+```
 
-  if (!membership) {
-    throw new ForbiddenError('NOT_MEMBER');
+### 9.3 Frontend Storage Pattern
+
+```typescript
+// App.tsx - After verifying auth token
+const data = await verifyTokenResponse.json();
+
+// Store tenant memberships for switcher UI (cached, no API calls needed)
+if (data.tenantMemberships) {
+  tenantStorage.set('tenant_memberships', JSON.stringify(data.tenantMemberships));
+}
+
+// Store Supabase tokens for authenticated API calls
+if (data.session?.access_token) {
+  sessionStorage.setItem('access_token', data.session.access_token);
+  if (data.session.refresh_token) {
+    sessionStorage.setItem('refresh_token', data.session.refresh_token);
   }
-
-  // Check verification for target tenant
-  const verificationStatus = await checkVerificationStatus(
-    session.user,
-    target_tenant_id
-  );
-
-  if (!verificationStatus.complete) {
-    return c.json({
-      requires_verification: true,
-      missing: verificationStatus.missing,
-      redirect_url: '/complete-profile'
-    }, 403);
-  }
-
-  // Create new session for target tenant
-  const newSession = await createSession(session.user.id, target_tenant_id);
-
-  return c.json({
-    tenant: membership.tenant,
-    session: newSession,
-    redirect_url: `https://${membership.tenant.slug}.zygo.tech`
-  });
 }
 ```
 
 ---
 
-## 8. RBAC System
+## 10. Tenant Switching
 
-### 8.1 Role Architecture
+### 10.1 Switch Tenant Flow
+
+```
+User clicks on different tenant in switcher
+         │
+         ▼
+┌─────────────────────┐
+│ POST /api/v1/auth/  │
+│ signin/switch-tenant│
+│ {tenant_slug}       │
+│ Authorization:      │
+│ Bearer {supabase_   │
+│ access_token}       │
+└──────────┬──────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ Validate Supabase   │
+│ token               │
+└──────────┬──────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ Look up user by     │
+│ email (handles      │
+│ OAuth ID mismatch)  │
+└──────────┬──────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ Verify user is      │──── NOT MEMBER ──► 403: "Not a member"
+│ member of target    │
+│ tenant              │
+└──────────┬──────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ Get membership      │
+│ with role info      │
+└──────────┬──────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ Refresh tenant      │
+│ memberships list    │
+└──────────┬──────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ Create new auth     │
+│ token for target    │
+│ tenant              │
+└──────────┬──────────┘
+         │
+         ▼
+┌─────────────────────┐
+│ Return:             │
+│ { auth_token,       │
+│   tenant: {...} }   │
+└─────────────────────┘
+         │
+         ▼
+Frontend:
+1. Clean up browser state
+2. Clear tenantStorage
+3. Clear caches
+4. Redirect to new tenant
+   with auth_token
+```
+
+### 10.2 Browser State Cleanup on Switch
+
+```typescript
+// ProfileMenu.tsx - cleanupBrowserState()
+const cleanupBrowserState = async () => {
+  // 1. Clear all tenant-scoped storage
+  tenantStorage.clear();
+
+  // 2. Clear ALL localStorage items with zygo prefix
+  Object.keys(localStorage).forEach(key => {
+    if (key.startsWith('zygo:')) localStorage.removeItem(key);
+  });
+
+  // 3. Clear ALL sessionStorage items
+  Object.keys(sessionStorage).forEach(key => {
+    if (key.startsWith('zygo:') || key === 'access_token' || key === 'refresh_token') {
+      sessionStorage.removeItem(key);
+    }
+  });
+
+  // 4. Reset application state
+  await resetOnFullLogout();
+
+  // 5. Clear any cached data
+  if ('caches' in window) {
+    const cacheNames = await caches.keys();
+    await Promise.all(cacheNames.map(name => caches.delete(name)));
+  }
+};
+```
+
+---
+
+## 11. RBAC System
+
+### 11.1 Role Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           ROLE TYPES                                         │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────────┐
 │  OWNER ROLE (Auto-created, PROTECTED)                                        │
-│  ─────────────────────────────────────                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
 │  • Created automatically on tenant signup                                   │
 │  • Cannot be modified (permissions, name, etc.)                             │
 │  • Cannot be deleted                                                        │
@@ -650,7 +960,7 @@ async function switchTenant(c: Context) {
 
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  CUSTOM ROLES (Tenant-created)                                               │
-│  ──────────────────────────────                                              │
+├─────────────────────────────────────────────────────────────────────────────┤
 │  • Created by tenant admins with canManageRoles permission                  │
 │  • Unlimited number per tenant                                              │
 │  • Fully customizable:                                                      │
@@ -665,628 +975,293 @@ async function switchTenant(c: Context) {
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### 8.2 Role Assignment Model
+### 11.2 Default Roles
+
+| Role | Hierarchy | Permissions | Description |
+|------|-----------|-------------|-------------|
+| Owner | 1 | All 114 | Full access, protected |
+| Admin | 10 | ~100 | Full access except billing |
+| Billing Admin | 20 | Billing only | Manage subscriptions |
+| Developer | 30 | Dev tools | Workflows, APIs, secrets |
+| Member | 50 | Basic | View and basic editing |
+| Viewer | 90 | Read-only | View only |
+
+### 11.3 Permission Categories (114 Total)
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                     USER ROLE ASSIGNMENT                                     │
-└─────────────────────────────────────────────────────────────────────────────┘
+Workflows (10)
+├── canViewWorkflows, canCreateWorkflows, canEditWorkflows, canDeleteWorkflows
+├── canExecuteWorkflows, canScheduleWorkflows, canViewWorkflowHistory
+├── canExportWorkflows, canImportWorkflows, canManageWorkflowVersions
 
-                          User in Tenant
-                                │
-                ┌───────────────┴───────────────┐
-                │                               │
-                ▼                               ▼
-        ┌───────────────┐               ┌───────────────┐
-        │ PRIMARY ROLE  │               │SECONDARY ROLES│
-        │               │               │               │
-        │ • Required    │               │ • Optional    │
-        │ • Exactly 1   │               │ • 0 to many   │
-        │ • Permanent   │               │ • Time-limited│
-        │ • Defines     │               │ • Adds extra  │
-        │   base access │               │   permissions │
-        └───────┬───────┘               └───────┬───────┘
-                │                               │
-                └───────────────┬───────────────┘
-                                │
-                                ▼
-                     ┌─────────────────────┐
-                     │ EFFECTIVE PERMISSIONS│
-                     │                     │
-                     │ = Union (OR) of all │
-                     │   permissions from  │
-                     │   ALL assigned roles│
-                     └─────────────────────┘
-```
+AI (8)
+├── canViewAI, canUseAI, canConfigureAI, canManageAIAgents
+├── canViewAIHistory, canExportAIData, canManageAIModels, canManageAIBudget
 
-### 8.3 Role Management Rules
+Data Sources (8)
+├── canViewDataSources, canCreateDataSources, canEditDataSources
+├── canDeleteDataSources, canConnectDataSources, canSyncDataSources
+├── canViewDataSourceLogs, canManageDataSourceCredentials
 
-```typescript
-// Validation rules for role operations
-const roleRules = {
-  // Creating roles
-  create: {
-    requiredPermission: 'canManageRoles',
-    hierarchyRule: 'Cannot create role with hierarchy < your own',
-    reservedNames: ['owner'],  // Cannot use "owner" name
-    minHierarchy: 2,  // Level 1 reserved for Owner
-  },
+Infrastructure (12)
+├── canViewServers, canCreateServers, canEditServers, canDeleteServers
+├── canStartServers, canStopServers, canRebuildServers, canResizeServers
+├── canViewSnapshots, canCreateSnapshots, canRestoreSnapshots, canDeleteSnapshots
 
-  // Modifying roles
-  modify: {
-    requiredPermission: 'canManageRoles',
-    protectedRoles: ['owner'],  // Cannot modify Owner role
-    hierarchyRule: 'Cannot modify roles above your hierarchy',
-  },
-
-  // Deleting roles
-  delete: {
-    requiredPermission: 'canManageRoles',
-    protectedRoles: ['owner'],  // Cannot delete Owner role
-    memberCheck: 'Cannot delete role with assigned members',
-    hierarchyRule: 'Cannot delete roles above your hierarchy',
-  },
-
-  // Assigning roles
-  assign: {
-    requiredPermission: 'canAssignRoles',
-    hierarchyRule: 'Cannot assign roles above your hierarchy',
-    ownerRule: 'At least 1 member must have Owner role',
-  },
-};
-```
-
-### 8.4 Creating Custom Roles
-
-```typescript
-// POST /api/v1/roles
-async function createRole(c: Context) {
-  const session = c.get('session');
-  const body = await c.req.json();
-
-  // Validate permission
-  if (!await hasPermission(session.userId, session.tenantId, 'canManageRoles')) {
-    throw new ForbiddenError('PERMISSION_DENIED');
-  }
-
-  // Validate hierarchy
-  const userHierarchy = await getUserHierarchy(session.userId, session.tenantId);
-  if (body.hierarchy_level <= userHierarchy) {
-    throw new ForbiddenError('HIERARCHY_VIOLATION',
-      `Cannot create role with hierarchy ${body.hierarchy_level}. Your level is ${userHierarchy}.`
-    );
-  }
-
-  // Validate not using reserved name
-  if (body.name.toLowerCase() === 'owner') {
-    throw new BadRequestError('RESERVED_NAME', 'Cannot use reserved role name "Owner"');
-  }
-
-  // Validate hierarchy >= 2
-  if (body.hierarchy_level < 2) {
-    throw new BadRequestError('INVALID_HIERARCHY', 'Hierarchy level must be 2 or higher');
-  }
-
-  // Create role
-  const [role] = await db.insert(roles).values({
-    tenant_id: session.tenantId,
-    name: body.name,
-    slug: slugify(body.name),
-    description: body.description,
-    hierarchy_level: body.hierarchy_level,
-    is_system: false,
-    is_protected: false,
-    created_by: session.userId,
-  }).returning();
-
-  // Assign permissions
-  if (body.permissions?.length > 0) {
-    const permissionRecords = await db.query.permissions.findMany({
-      where: inArray(permissions.key, body.permissions)
-    });
-
-    await db.insert(rolePermissions).values(
-      permissionRecords.map(p => ({
-        role_id: role.id,
-        permission_id: p.id,
-        tenant_id: session.tenantId,
-        granted_by: session.userId,
-      }))
-    );
-  }
-
-  // Audit log
-  await auditLog('role.created', {
-    tenantId: session.tenantId,
-    roleId: role.id,
-    roleName: role.name,
-    permissionCount: body.permissions?.length || 0,
-    createdBy: session.userId,
-  });
-
-  return c.json({ role }, 201);
-}
-```
-
-### 8.5 Owner Role Protection
-
-```typescript
-// Middleware to protect Owner role operations
-async function protectOwnerRole(c: Context, next: Next) {
-  const roleId = c.req.param('roleId');
-
-  const role = await db.query.roles.findFirst({
-    where: eq(roles.id, roleId)
-  });
-
-  if (role?.is_protected) {
-    throw new ForbiddenError('PROTECTED_ROLE',
-      'The Owner role cannot be modified or deleted'
-    );
-  }
-
-  await next();
-}
-
-// Ensure at least 1 Owner exists
-async function ensureOwnerExists(tenantId: string): Promise<void> {
-  const ownerRole = await db.query.roles.findFirst({
-    where: and(
-      eq(roles.tenant_id, tenantId),
-      eq(roles.slug, 'owner')
-    )
-  });
-
-  const ownerMembers = await db.query.tenantMembers.findMany({
-    where: and(
-      eq(tenantMembers.tenant_id, tenantId),
-      eq(tenantMembers.primary_role_id, ownerRole.id),
-      eq(tenantMembers.status, 'active')
-    )
-  });
-
-  if (ownerMembers.length === 0) {
-    throw new ForbiddenError('OWNER_REQUIRED',
-      'At least one member must have the Owner role'
-    );
-  }
-}
+... and more categories
 ```
 
 ---
 
-## 9. Permission Resolution & Caching
+## 12. Permission Resolution & Caching
 
-### 9.1 Permission Check Flow
+### 12.1 Permission Check Flow
 
 ```
-API Request with required permission
-                    │
-                    ▼
-         ┌─────────────────────┐
-         │ Check Redis Cache   │
-         │ Key: rbac:{user}:{tenant}
-         └──────────┬──────────┘
-                    │
-        ┌───────────┴───────────┐
-        │ MISS                  │ HIT
-        ▼                       ▼
-┌───────────────────┐    Use cached
-│ Load from DB:     │    permissions
-│ - Primary role    │         │
-│ - Secondary roles │         │
-│ - Merge (union)   │         │
-│ - Cache 5 min     │         │
-└─────────┬─────────┘         │
-          │                   │
-          └─────────┬─────────┘
-                    │
-                    ▼
-         ┌─────────────────────┐
-         │ Permission in set?  │──── NO ───► 403 DENY
-         └──────────┬──────────┘
-                    │ YES
-                    ▼
-         ┌─────────────────────┐
-         │ Is critical         │
-         │ (MFA required)?     │
-         └──────────┬──────────┘
-                    │
-        ┌───────────┴───────────┐
-        │ NO                    │ YES
-        ▼                       ▼
-     ALLOW               Check MFA verified
-                         in last 15 min
-                                │
-                        ┌───────┴───────┐
-                        │ NO            │ YES
-                        ▼               ▼
-                   MFA Challenge     ALLOW
+API Request
+         │
+         ▼
+┌─────────────────────┐
+│ Check Redis Cache   │
+│ Key: rbac:{user}:   │
+│      {tenant}       │
+└──────────┬──────────┘
+         │
+   ┌─────┴─────┐
+   │ MISS      │ HIT
+   ▼           ▼
+Load from   Use cached
+DB, cache   permissions
+5 min
+         │
+         ▼
+┌─────────────────────┐
+│ Permission in set?  │──── NO ───► 403 DENY
+└──────────┬──────────┘
+           │ YES
+           ▼
+┌─────────────────────┐
+│ Critical action?    │──── YES ──► Check MFA (15 min window)
+│ (delete, export)    │
+└──────────┬──────────┘
+           │ NO
+           ▼
+        ALLOW
 ```
 
-### 9.2 Permission Resolution
+### 12.2 Permission Merge (UNION)
 
 ```typescript
-async function resolvePermissions(
-  userId: string,
-  tenantId: string
-): Promise<Map<string, PermissionGrant>> {
-  const cacheKey = `rbac:${userId}:${tenantId}`;
+// All permissions from primary role + all active secondary roles
+const permissions = new Map<string, PermissionGrant>();
 
-  // Try cache
-  const cached = await redis.get(cacheKey);
-  if (cached) {
-    return new Map(JSON.parse(cached));
-  }
-
-  // Load from DB
-  const membership = await db.query.tenantMembers.findFirst({
-    where: and(
-      eq(tenantMembers.userId, userId),
-      eq(tenantMembers.tenantId, tenantId),
-      eq(tenantMembers.status, 'active')
-    ),
-    with: {
-      primaryRole: {
-        with: { permissions: { with: { permission: true } } }
-      },
-      secondaryRoles: {
-        where: or(
-          isNull(secondaryRoleAssignments.expiresAt),
-          gt(secondaryRoleAssignments.expiresAt, new Date())
-        ),
-        with: {
-          role: {
-            with: { permissions: { with: { permission: true } } }
-          }
-        }
-      }
-    }
+// Primary role
+for (const rp of membership.primaryRole.permissions) {
+  permissions.set(rp.permission.key, {
+    key: rp.permission.key,
+    roleId: membership.primaryRole.id,
+    roleName: membership.primaryRole.name,
+    isPrimary: true,
+    expiresAt: null,
   });
+}
 
-  if (!membership) {
-    return new Map();
-  }
-
-  // Merge all permissions (UNION)
-  const permissions = new Map<string, PermissionGrant>();
-
-  // Primary role
-  for (const rp of membership.primaryRole.permissions) {
-    permissions.set(rp.permission.key, {
-      key: rp.permission.key,
-      roleId: membership.primaryRole.id,
-      roleName: membership.primaryRole.name,
-      isPrimary: true,
-      expiresAt: null,
-    });
-  }
-
-  // Secondary roles
-  for (const sra of membership.secondaryRoles) {
-    for (const rp of sra.role.permissions) {
-      if (!permissions.has(rp.permission.key)) {
-        permissions.set(rp.permission.key, {
-          key: rp.permission.key,
-          roleId: sra.role.id,
-          roleName: sra.role.name,
-          isPrimary: false,
-          expiresAt: sra.expiresAt,
-        });
-      }
+// Secondary roles (time-limited)
+for (const sra of membership.secondaryRoles) {
+  for (const rp of sra.role.permissions) {
+    if (!permissions.has(rp.permission.key)) {
+      permissions.set(rp.permission.key, { ... });
     }
   }
-
-  // Cache with 5 min TTL
-  await redis.setex(cacheKey, 300, JSON.stringify([...permissions]));
-
-  return permissions;
 }
 ```
 
-### 9.3 Immediate Cache Invalidation
+### 12.3 Cache Invalidation
 
 ```typescript
-// Called on ANY permission-affecting change
-async function invalidatePermissionCache(
-  userId: string,
-  tenantId: string
-): Promise<void> {
+// Invalidate on:
+// - Role assigned to user
+// - Role removed from user
+// - Role permissions modified
+// - Secondary role assigned/expired/revoked
+// - User's primary role changed
+
+async function invalidatePermissionCache(userId: string, tenantId: string) {
   const key = `rbac:${userId}:${tenantId}`;
   await redis.del(key);
 
   // Publish for distributed systems
-  await redis.publish('rbac:invalidate', JSON.stringify({
-    userId,
-    tenantId,
-    timestamp: Date.now()
-  }));
-}
-
-// Called when role permissions change (affects all users with role)
-async function invalidateRoleCache(
-  roleId: string,
-  tenantId: string
-): Promise<void> {
-  // Get all users with this role (primary or secondary)
-  const primaryMembers = await db.query.tenantMembers.findMany({
-    where: eq(tenantMembers.primaryRoleId, roleId),
-    columns: { userId: true }
-  });
-
-  const secondaryMembers = await db.query.secondaryRoleAssignments.findMany({
-    where: and(
-      eq(secondaryRoleAssignments.roleId, roleId),
-      eq(secondaryRoleAssignments.status, 'active')
-    ),
-    columns: { userId: true }
-  });
-
-  const userIds = new Set([
-    ...primaryMembers.map(m => m.userId),
-    ...secondaryMembers.map(m => m.userId)
-  ]);
-
-  // Invalidate all affected users
-  const pipeline = redis.pipeline();
-  for (const userId of userIds) {
-    pipeline.del(`rbac:${userId}:${tenantId}`);
-  }
-  await pipeline.exec();
-}
-
-// Events that trigger invalidation:
-// - Role assigned to user
-// - Role removed from user
-// - Role permissions modified
-// - Secondary role assigned
-// - Secondary role expired/revoked
-// - User's primary role changed
-```
-
-### 9.4 Critical Permissions (MFA Required)
-
-```typescript
-const CRITICAL_PERMISSIONS = {
-  canDeleteUsers: { requiresMfa: true },
-  canDeleteTenant: { requiresMfa: true },
-  canCancelSubscription: { requiresMfa: true },
-  canExportSecrets: { requiresMfa: true },
-  canExportAuditLogs: { requiresMfa: true },
-  canExportAIData: { requiresMfa: true },
-  canRebuildServers: { requiresMfa: true },
-  canRestoreSnapshots: { requiresMfa: true },
-};
-
-// Middleware for MFA-required permissions
-function requireMfaForCritical(permission: string) {
-  return async (c: Context, next: Next) => {
-    if (!CRITICAL_PERMISSIONS[permission]?.requiresMfa) {
-      return next();
-    }
-
-    const session = c.get('session');
-    const mfaAge = Date.now() - new Date(session.mfaVerifiedAt || 0).getTime();
-
-    if (mfaAge > 15 * 60 * 1000) { // 15 minutes
-      const challenge = await createMfaChallenge(session.userId, permission);
-      throw new MfaRequiredError({
-        permission,
-        challengeId: challenge.id,
-        message: 'MFA verification required for this action'
-      });
-    }
-
-    await next();
-  };
+  await redis.publish('rbac:invalidate', JSON.stringify({ userId, tenantId }));
 }
 ```
 
 ---
 
-## 10. Account Linking Strategy
+## 13. Account Linking Strategy
 
-### 10.1 Linking Rules
+### 13.1 Linking Rules
 
-| Scenario | Has Other Tenants? | Action |
-|----------|-------------------|--------|
+| Scenario | Has Tenants? | Action |
+|----------|-------------|--------|
 | OAuth login, user doesn't exist | - | Create user (signup) |
 | OAuth login, user exists, OAuth not linked | **No** | Auto-link |
 | OAuth login, user exists, OAuth not linked | **Yes** | **Require email verification** |
-| OAuth login, OAuth already linked | - | Update tokens |
+| OAuth login, OAuth already linked | - | Update tokens, proceed |
 
-### 10.2 Verification Flow
+### 13.2 Unlinking OAuth
 
-```
-User OAuth login, has existing tenants, OAuth not linked
-                    │
-                    ▼
-         ┌─────────────────────┐
-         │ Create link request │
-         │ Send 6-digit code   │
-         │ to user's email     │
-         └──────────┬──────────┘
-                    │
-                    ▼
-         ┌─────────────────────┐
-         │ User enters code    │
-         └──────────┬──────────┘
-                    │
-        ┌───────────┴───────────┐
-        │ INVALID (max 3)       │ VALID
-        ▼                       ▼
-   Block request          Link OAuth
-                          Continue signin
+```typescript
+// When unlinking the ONLY OAuth provider that verified the email
+if (user.emailVerifiedVia === provider && !user.passwordHash) {
+  // Reset email verification
+  await db.update(users).set({
+    emailVerified: false,
+    emailVerifiedVia: null,
+  }).where(eq(users.id, user.id));
+
+  return { emailVerificationReset: true };
+}
 ```
 
 ---
 
-## 11. Domain Claiming (Enterprise)
+## 14. Session Management
 
-| Setting | Value |
-|---------|-------|
-| Availability | Enterprise plan only |
-| Default | Disabled |
-| Effect | Warning to users with claimed domain |
-| User Action | Can still create personal workspace |
+### 14.1 Token Lifetimes
 
----
+| Token | Lifetime | Storage |
+|-------|----------|---------|
+| Supabase Access Token | 1 hour | sessionStorage |
+| Supabase Refresh Token | 7 days | sessionStorage |
+| Auth Token (cross-domain) | 2 minutes | Redis |
+| MFA Session | 15 minutes | Redis |
 
-## 12. Free Trial & Billing Rules
+### 14.2 Token Refresh
 
-### 12.1 Trial Rules
+```typescript
+// Frontend: Supabase handles refresh automatically
+await supabase.auth.setSession({
+  access_token: data.session.access_token,
+  refresh_token: data.session.refresh_token,
+});
 
-| Rule | Value |
-|------|-------|
-| Duration | 14 days |
-| Tokens | 50% of plan |
-| Max Users | 20 |
-| Scope | Per tenant |
-
-### 12.2 Lifecycle
-
-```
-Day 0       Day 7       Day 13      Day 14      Day 74
-  │           │           │           │           │
-Trial       Email       Email       Expires     Soft delete
-starts      warning     warning     0 tokens    Block owner
-50% tokens
+// Supabase will refresh the access token before expiry
 ```
 
 ---
 
-## 13. Tenant Types
-
-| Feature | Personal | Organization |
-|---------|----------|--------------|
-| Max Users | 1 | Plan-based |
-| Custom Roles | No | Yes |
-| SSO | No | Enterprise |
-
----
-
-## 14. Admin Panel Authentication
+## 15. Admin Panel Authentication
 
 | Rule | Value |
 |------|-------|
 | Auth Methods | Email/Password **ONLY** |
 | MFA | **Mandatory** |
 | OAuth | **Not allowed** |
-| Session | 4 hours |
+| Session | 4 hours max |
+| IP Restriction | Optional whitelist |
 
 ---
 
-## 15. Database Schema
+## 16. API Endpoints Reference
 
-```sql
--- Roles table
-CREATE TABLE roles (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id UUID NOT NULL REFERENCES tenants(id),
-  name VARCHAR(100) NOT NULL,
-  slug VARCHAR(50) NOT NULL,
-  description TEXT,
-  hierarchy_level INTEGER NOT NULL CHECK (hierarchy_level BETWEEN 1 AND 100),
-  is_system BOOLEAN DEFAULT FALSE,
-  is_protected BOOLEAN DEFAULT FALSE,  -- Cannot modify/delete if true
-  created_by UUID REFERENCES users(id),
-  created_at TIMESTAMP DEFAULT NOW(),
-  updated_at TIMESTAMP DEFAULT NOW(),
-  UNIQUE(tenant_id, slug)
-);
+### Authentication
 
--- Role permissions
-CREATE TABLE role_permissions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-  permission_id UUID NOT NULL REFERENCES permissions(id),
-  tenant_id UUID NOT NULL REFERENCES tenants(id),
-  granted_by UUID REFERENCES users(id),
-  granted_at TIMESTAMP DEFAULT NOW(),
-  UNIQUE(role_id, permission_id)
-);
+```
+# Signup
+POST /api/v1/auth/signup                    # Full onboarding signup
+POST /api/v1/auth/signup/create-workspace   # Existing user creates workspace
+GET  /api/v1/auth/signup/check-slug/:slug   # Check slug availability
+GET  /api/v1/auth/signup/check-email/:email # Check email availability
+POST /api/v1/auth/signup/verify-password    # Verify password for existing user
+GET  /api/v1/auth/signup/plans              # Get available plans
 
--- Tenant members (with primary role)
-CREATE TABLE tenant_members (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id UUID NOT NULL REFERENCES tenants(id),
-  user_id UUID NOT NULL REFERENCES users(id),
-  primary_role_id UUID NOT NULL REFERENCES roles(id),
-  is_owner BOOLEAN DEFAULT FALSE,
-  status VARCHAR(20) DEFAULT 'active',
-  created_at TIMESTAMP DEFAULT NOW(),
-  UNIQUE(tenant_id, user_id)
-);
+# Signin
+POST /api/v1/auth/signin                    # Email/password signin
+POST /api/v1/auth/signin/switch-tenant      # Switch to different tenant
+POST /api/v1/auth/signin/signout            # Sign out
 
--- Secondary role assignments (optional, time-limited)
-CREATE TABLE secondary_role_assignments (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL REFERENCES users(id),
-  tenant_id UUID NOT NULL REFERENCES tenants(id),
-  role_id UUID NOT NULL REFERENCES roles(id),
-  expires_at TIMESTAMP,
-  reason TEXT,
-  assigned_by UUID REFERENCES users(id),
-  status VARCHAR(20) DEFAULT 'active',
-  created_at TIMESTAMP DEFAULT NOW()
-);
+# OAuth
+POST /api/v1/auth/oauth/callback            # Exchange OAuth code
+POST /api/v1/auth/oauth/signin              # OAuth signin
+POST /api/v1/auth/oauth/complete-signup     # Complete OAuth signup
+POST /api/v1/auth/oauth/link/initiate       # Start account linking
+POST /api/v1/auth/oauth/link/verify         # Complete account linking
+GET  /api/v1/auth/oauth/providers           # List linked providers
+DELETE /api/v1/auth/oauth/providers/:p      # Unlink provider
 
--- Tenant security config
-CREATE TABLE tenant_security_config (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id UUID UNIQUE NOT NULL REFERENCES tenants(id),
-  require_phone_verification BOOLEAN DEFAULT TRUE,
-  require_mfa BOOLEAN DEFAULT TRUE,
-  phone_verification_deadline_days INTEGER DEFAULT 3,
-  mfa_deadline_days INTEGER DEFAULT 7,
-  updated_at TIMESTAMP DEFAULT NOW()
-);
+# Token Verification
+POST /api/v1/auth/verify-token              # Verify auth token (cross-domain)
 
--- Users additions
-ALTER TABLE users ADD COLUMN email_verified BOOLEAN DEFAULT FALSE;
-ALTER TABLE users ADD COLUMN phone VARCHAR(20);
-ALTER TABLE users ADD COLUMN phone_verified BOOLEAN DEFAULT FALSE;
-ALTER TABLE users ADD COLUMN mfa_enabled BOOLEAN DEFAULT FALSE;
-ALTER TABLE users ADD COLUMN blocked_until TIMESTAMP;
-ALTER TABLE users ADD COLUMN block_reason VARCHAR(50);
+# Password Reset
+POST /api/v1/auth/forgot-password           # Request reset code
+POST /api/v1/auth/verify-reset-code         # Verify code, get token
+POST /api/v1/auth/reset-password            # Reset password
+GET  /api/v1/auth/reset-status              # Check reset status
+
+# Email Verification
+POST /api/v1/auth/verify-email              # Verify email code
+POST /api/v1/auth/verify-email/resend       # Resend verification
+GET  /api/v1/auth/verify-email/status       # Check verification status
+
+# Phone Verification
+POST /api/v1/auth/verify-phone/send-code    # Send SMS code
+POST /api/v1/auth/verify-phone              # Verify phone code
+GET  /api/v1/auth/verify-phone/status       # Check phone status
+
+# MFA
+POST /api/v1/auth/mfa/setup                 # Start MFA setup
+POST /api/v1/auth/mfa/enable                # Enable MFA
+POST /api/v1/auth/mfa/verify                # Verify MFA code
+POST /api/v1/auth/mfa/disable               # Disable MFA
+POST /api/v1/auth/mfa/backup-codes          # Regenerate backup codes
+GET  /api/v1/auth/mfa/status                # Get MFA status
 ```
 
 ---
 
-## 16. Implementation Checklist
+## 17. Implementation Checklist
 
-### Phase 1: Core Auth
+### Phase 1: Core Auth ✅
 - [x] Signup with Owner role creation
-- [x] Email verification (immediate)
+- [x] Email verification
 - [x] Signin with verification check
 - [x] Complete profile page
 - [x] Phone verification (Twilio)
 - [x] MFA setup (TOTP)
-- [x] Password reset (forgot-password, verify-code, reset-password)
+- [x] Password reset (3-step)
 
-### Phase 2: RBAC
+### Phase 2: Cross-Domain Auth ✅
+- [x] Auth token service (Redis)
+- [x] verify-token endpoint
+- [x] Frontend token verification
+- [x] Supabase token passthrough
+
+### Phase 3: Multi-Tenant ✅
+- [x] Tenant memberships caching
+- [x] Tenant switching
+- [x] Browser state cleanup
+- [x] Tenant isolation enforcement
+
+### Phase 4: OAuth ✅
+- [x] Google OAuth
+- [x] GitHub OAuth
+- [x] Account linking with verification
+- [x] Auto-link for users without tenants
+
+### Phase 5: RBAC ✅
 - [x] Permission resolution with Redis cache
 - [x] Immediate cache invalidation
 - [x] Custom role CRUD
 - [x] Owner role protection
 - [x] Role assignment with hierarchy check
-- [x] Secondary role assignment (time-limited)
 
-### Phase 3: Multi-Tenant
-- [x] Tenant picker (GET /api/v1/tenants)
-- [x] Tenant switching with verification check (POST /api/v1/tenants/switch)
-- [x] Tenant-specific security config (GET/PATCH /api/v1/tenants/:id/security-config)
-
-### Phase 4: OAuth & Linking
-- [x] Google, GitHub OAuth (POST /api/v1/auth/oauth/callback, /signin)
-- [x] Account linking with verification (POST /api/v1/auth/oauth/link/initiate, /verify)
-- [x] Auto-link for users without tenants (automatic in /oauth/signin)
-
-### Phase 5: Enterprise
-- [x] SAML/OIDC configuration (GET/PUT/DELETE /api/v1/tenants/:id/sso)
-- [x] Domain claiming (GET/POST/DELETE /api/v1/tenants/:id/domains)
-- [x] Admin panel (email + MFA only) (/api/v1/admin/auth/*)
+### Phase 6: Enterprise (In Progress)
+- [ ] Microsoft OAuth
+- [ ] Apple OAuth
+- [ ] SAML/OIDC configuration
+- [ ] Domain claiming
+- [ ] Admin panel (email + MFA only)
 
 ---
 
-*Version: 1.0.0 | January 2026*
+*Version: 2.0.0 | February 2, 2026*
