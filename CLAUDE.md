@@ -75,6 +75,36 @@ Key variables (see contracts/.env.example):
 | `admin.zygo.tech` | Admin panel |
 | `getzygo.com` | Landing page |
 
+## Database Access
+
+### Production Database
+
+The production PostgreSQL runs in Docker on `178.156.195.2` (self-hosted Supabase).
+
+```bash
+# Connect to database
+ssh root@178.156.195.2 "docker exec -it supabase-db psql -U postgres -d postgres"
+
+# Run SQL command
+ssh root@178.156.195.2 "docker exec -i supabase-db psql -U postgres -d postgres -c 'SELECT count(*) FROM users;'"
+
+# Apply Drizzle migration
+npm run db:generate
+ssh root@178.156.195.2 "docker exec -i supabase-db psql -U postgres -d postgres" < drizzle/XXXX_migration.sql
+```
+
+### Supabase Studio
+
+Access at: https://studio.zygo.tech
+
+### Docker Containers
+
+Key containers on 178.156.195.2:
+- `supabase-db` - PostgreSQL 15
+- `supabase-rest` - PostgREST API
+- `supabase-auth` - GoTrue
+- `supabase-kong` - API Gateway
+
 ## Related Repos
 
 | Repo | Purpose | Editable |
