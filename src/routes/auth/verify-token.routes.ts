@@ -101,7 +101,7 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
     status: 'success',
   });
 
-  // Return verified user, tenant, role, and permissions
+  // Return verified user, tenant, role, permissions, session, and tenant memberships
   return c.json({
     verified: true,
     user: {
@@ -129,6 +129,13 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
       isOwner: payload.isOwner,
     },
     permissions,
+    // Supabase session tokens for authenticated API calls
+    session: payload.supabaseAccessToken ? {
+      access_token: payload.supabaseAccessToken,
+      refresh_token: payload.supabaseRefreshToken || null,
+    } : null,
+    // Cached tenant memberships for tenant switcher UI (no API calls needed)
+    tenantMemberships: payload.tenantMemberships || [],
   });
 });
 

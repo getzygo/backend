@@ -15,6 +15,21 @@ import { randomBytes } from 'crypto';
 import { getRedis, REDIS_KEYS, REDIS_TTL } from '../db/redis';
 
 /**
+ * Tenant membership info (for tenant switcher)
+ */
+export interface TenantMembership {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  role: {
+    id: string;
+    name: string;
+  };
+  isOwner: boolean;
+}
+
+/**
  * Auth token payload stored in Redis
  */
 export interface AuthTokenPayload {
@@ -31,6 +46,11 @@ export interface AuthTokenPayload {
   roleName: string;
   roleSlug: string;
   isOwner: boolean;
+  // Supabase session tokens (for API authentication)
+  supabaseAccessToken?: string;
+  supabaseRefreshToken?: string;
+  // User's tenant memberships (cached from login, for tenant switcher UI)
+  tenantMemberships?: TenantMembership[];
   createdAt: number;
 }
 

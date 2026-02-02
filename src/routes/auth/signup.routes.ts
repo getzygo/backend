@@ -20,6 +20,7 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { signup } from '../../services/signup.service';
 import { createAuthToken } from '../../services/auth-token.service';
+import { signInWithPassword } from '../../services/supabase.service';
 import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 
@@ -134,6 +135,22 @@ app.post('/', zValidator('json', signupSchema), async (c) => {
       userAgent: userAgent || undefined,
     });
 
+    // Sign in to get Supabase session tokens for authenticated API calls
+    const authResult = await signInWithPassword(body.email, body.password);
+
+    // For new signup, this is the only tenant (newly created)
+    const tenantMemberships = [{
+      id: result.tenant.id,
+      name: result.tenant.name,
+      slug: result.tenant.slug,
+      plan: result.tenant.plan,
+      role: {
+        id: result.role.id,
+        name: result.role.name,
+      },
+      isOwner: true,
+    }];
+
     // Create auth token for redirect to tenant app
     const authToken = await createAuthToken({
       userId: result.user.id,
@@ -148,6 +165,10 @@ app.post('/', zValidator('json', signupSchema), async (c) => {
       roleName: result.role.name,
       roleSlug: result.role.slug,
       isOwner: true,
+      // Include Supabase tokens for authenticated API calls
+      supabaseAccessToken: authResult.session?.access_token,
+      supabaseRefreshToken: authResult.session?.refresh_token,
+      tenantMemberships, // Cached tenant list for switcher UI
     });
 
     // Build redirect URL with auth token
@@ -364,7 +385,22 @@ app.post('/create-workspace', zValidator('json', createWorkspaceSchema), async (
       );
     }
 
-    // 6. Create auth token for redirect
+    // 6. Get all user's tenants for switcher UI (including newly created one)
+    const { getUserTenants } = await import('../../services/tenant.service');
+    const userTenants = await getUserTenants(user.id);
+    const tenantMemberships = userTenants.map((m) => ({
+      id: m.tenant.id,
+      name: m.tenant.name,
+      slug: m.tenant.slug,
+      plan: m.tenant.plan,
+      role: {
+        id: m.role.id,
+        name: m.role.name,
+      },
+      isOwner: m.isOwner,
+    }));
+
+    // 7. Create auth token for redirect
     const authToken = await createAuthToken({
       userId: user.id,
       tenantId: tenantResult.tenant.id,
@@ -378,12 +414,16 @@ app.post('/create-workspace', zValidator('json', createWorkspaceSchema), async (
       roleName: tenantResult.ownerRole.name,
       roleSlug: tenantResult.ownerRole.slug,
       isOwner: true,
+      // Include Supabase tokens for authenticated API calls
+      supabaseAccessToken: authResult.session?.access_token,
+      supabaseRefreshToken: authResult.session?.refresh_token,
+      tenantMemberships, // Cached tenant list for switcher UI
     });
 
-    // 7. Build redirect URL
+    // 8. Build redirect URL
     const redirectUrl = `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`;
 
-    // 8. Check verification status for response
+    // 9. Check verification status for response
     const verificationStatus = await checkVerificationStatus(user, tenantResult.tenant.id);
 
     return c.json({

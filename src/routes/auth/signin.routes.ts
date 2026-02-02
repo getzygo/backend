@@ -288,7 +288,21 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
         );
       }
 
+      // Map user's tenant memberships for the switcher UI (cached, no API calls needed)
+      const tenantMemberships = userTenants.map((m) => ({
+        id: m.tenant.id,
+        name: m.tenant.name,
+        slug: m.tenant.slug,
+        plan: m.tenant.plan,
+        role: {
+          id: m.role.id,
+          name: m.role.name,
+        },
+        isOwner: m.isOwner,
+      }));
+
       // Generate secure opaque auth token stored in Redis
+      // Include Supabase tokens so tenant app can make authenticated API calls
       const authToken = await createAuthToken({
         userId: user.id,
         tenantId: targetTenant.id,
@@ -302,6 +316,9 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
         roleName: membership.role.name,
         roleSlug: membership.role.slug,
         isOwner: membership.isOwner,
+        supabaseAccessToken: authResult.session.access_token,
+        supabaseRefreshToken: authResult.session.refresh_token,
+        tenantMemberships, // Cached tenant list for switcher UI
       });
       redirectUrl = `https://${targetTenant.slug}.zygo.tech?auth_token=${authToken}`;
     }
@@ -480,7 +497,22 @@ app.post('/switch-tenant', zValidator('json', switchTenantSchema), async (c) => 
   const supabaseMeta = supabaseUser.user_metadata || {};
   const avatarUrl = user.avatarUrl || supabaseMeta.avatar_url || supabaseMeta.picture;
 
+  // Get all user's tenants for the switcher UI
+  const userTenants = await getUserTenants(user.id);
+  const tenantMemberships = userTenants.map((m) => ({
+    id: m.tenant.id,
+    name: m.tenant.name,
+    slug: m.tenant.slug,
+    plan: m.tenant.plan,
+    role: {
+      id: m.role.id,
+      name: m.role.name,
+    },
+    isOwner: m.isOwner,
+  }));
+
   // Generate secure opaque auth token stored in Redis
+  // Include Supabase access token so tenant app can make authenticated API calls
   const authToken = await createAuthToken({
     userId: user.id,
     tenantId: tenant.id,
@@ -494,6 +526,8 @@ app.post('/switch-tenant', zValidator('json', switchTenantSchema), async (c) => 
     roleName: membership.role.name,
     roleSlug: membership.role.slug,
     isOwner: membership.isOwner,
+    supabaseAccessToken: token, // Pass current access token for API calls
+    tenantMemberships, // Cached tenant list for switcher UI
   });
 
   // Audit log
