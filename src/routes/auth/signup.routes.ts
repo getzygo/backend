@@ -17,8 +17,11 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
+import { eq } from 'drizzle-orm';
 import { signup } from '../../services/signup.service';
 import { createAuthToken } from '../../services/auth-token.service';
+import { getDb } from '../../db/client';
+import { users } from '../../db/schema';
 
 const app = new Hono();
 
@@ -240,6 +243,36 @@ app.get('/check-slug/:slug', async (c) => {
   return c.json({
     slug,
     available,
+  });
+});
+
+/**
+ * GET /api/v1/auth/signup/check-email/:email
+ * Check if email is available for signup
+ */
+app.get('/check-email/:email', async (c) => {
+  const email = c.req.param('email').toLowerCase().trim();
+
+  // Basic email validation
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return c.json({
+      email,
+      available: false,
+      error: 'Invalid email format',
+    });
+  }
+
+  // Check if email exists in users table
+  const db = getDb();
+  const existingUser = await db.query.users.findFirst({
+    where: eq(users.email, email),
+    columns: { id: true },
+  });
+
+  return c.json({
+    email,
+    available: !existingUser,
   });
 });
 
