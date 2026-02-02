@@ -84,7 +84,7 @@ export async function createAuthUser(
   const { data, error } = await supabase.auth.admin.createUser({
     email,
     password,
-    email_confirm: false, // We handle email verification ourselves
+    email_confirm: true, // Mark as confirmed so Supabase allows sign-in (we verify email separately)
     user_metadata: metadata,
   });
 
