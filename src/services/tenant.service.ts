@@ -14,12 +14,14 @@ import {
   roles,
   rolePermissions,
   permissions,
+  users,
   type Tenant,
   type NewTenant,
   type TenantSecurityConfig,
   type NewTenantSecurityConfig,
   type Role,
   type TenantMember,
+  type User,
 } from '../db/schema';
 import { invalidateTenantConfigCache } from './verification.service';
 import { isValidSlug, isBlockedSlug } from '../utils/slug-validation';
@@ -29,6 +31,62 @@ export { isValidSlug, isBlockedSlug };
 
 // Trial period in days
 const TRIAL_PERIOD_DAYS = 14;
+
+/**
+ * Check if user has already used their trial period
+ */
+export async function hasUserUsedTrial(userId: string): Promise<boolean> {
+  const db = getDb();
+
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, userId),
+    columns: { hasUsedTrial: true },
+  });
+
+  return user?.hasUsedTrial ?? false;
+}
+
+/**
+ * Check if user already has a Core plan tenant
+ * Users are limited to 1 Core (free) subscription per email
+ */
+export async function userHasCorePlanTenant(userId: string): Promise<boolean> {
+  const db = getDb();
+
+  // Get all active tenant memberships where user is owner
+  const memberships = await db.query.tenantMembers.findMany({
+    where: and(
+      eq(tenantMembers.userId, userId),
+      eq(tenantMembers.isOwner, true),
+      eq(tenantMembers.status, 'active')
+    ),
+    with: {
+      tenant: {
+        columns: { plan: true, status: true },
+      },
+    },
+  });
+
+  // Check if any owned tenant has Core plan
+  return memberships.some(
+    (m) => m.tenant.plan === 'core' && m.tenant.status === 'active'
+  );
+}
+
+/**
+ * Mark user as having used their trial
+ */
+async function markTrialUsed(userId: string): Promise<void> {
+  const db = getDb();
+
+  await db
+    .update(users)
+    .set({
+      hasUsedTrial: true,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
+}
 
 /**
  * Check if a slug is available
@@ -111,19 +169,24 @@ export async function getTenantSecurityConfig(
 
 /**
  * Create a new tenant with default security config
+ *
+ * Limitations enforced:
+ * 1. Only 1 trial period per email (first signup counts)
+ * 2. Only 1 Core subscription per email address
  */
 export async function createTenant(params: {
   name: string;
   slug: string;
   type: 'personal' | 'organization';
   ownerUserId: string;
+  plan?: 'core' | 'flow' | 'scale' | 'enterprise';
 }): Promise<{
   tenant: Tenant;
   securityConfig: TenantSecurityConfig;
   ownerRole: Role;
   membership: TenantMember;
 } | null> {
-  const { name, slug, type, ownerUserId } = params;
+  const { name, slug, type, ownerUserId, plan = 'core' } = params;
 
   // Validate slug
   if (!isValidSlug(slug)) {
@@ -142,18 +205,35 @@ export async function createTenant(params: {
     throw new Error('Slug already taken');
   }
 
-  // Calculate trial expiration
-  const trialExpiresAt = new Date();
-  trialExpiresAt.setDate(trialExpiresAt.getDate() + TRIAL_PERIOD_DAYS);
+  // LIMITATION: Only 1 Core subscription per email
+  if (plan === 'core') {
+    const hasCore = await userHasCorePlanTenant(ownerUserId);
+    if (hasCore) {
+      throw new Error('You can only have one Core (free) workspace. Please upgrade to create additional workspaces.');
+    }
+  }
+
+  // LIMITATION: Only 1 trial period per email
+  const usedTrial = await hasUserUsedTrial(ownerUserId);
+  let trialExpiresAt: Date | null = null;
+  let subscriptionStatus: 'trialing' | 'active' | 'past_due' | 'canceled' | 'unpaid' = 'active';
+
+  if (!usedTrial) {
+    // First time user - grant trial period
+    trialExpiresAt = new Date();
+    trialExpiresAt.setDate(trialExpiresAt.getDate() + TRIAL_PERIOD_DAYS);
+    subscriptionStatus = 'trialing';
+  }
+  // If user has already used trial, they start with 'active' status and no trial
 
   // Create tenant
   const newTenant: NewTenant = {
     name,
     slug: slug.toLowerCase(),
     type,
-    plan: 'core',
+    plan,
     trialExpiresAt,
-    subscriptionStatus: 'trialing',
+    subscriptionStatus,
     status: 'active',
   };
 
@@ -214,6 +294,11 @@ export async function createTenant(params: {
       joinedAt: new Date(),
     })
     .returning();
+
+  // Mark user as having used their trial (if this was their first tenant)
+  if (!usedTrial && subscriptionStatus === 'trialing') {
+    await markTrialUsed(ownerUserId);
+  }
 
   return {
     tenant,
@@ -386,4 +471,6 @@ export const tenantService = {
   isTenantOwner,
   getTenantMembership,
   getTenantMembershipWithRole,
+  hasUserUsedTrial,
+  userHasCorePlanTenant,
 };

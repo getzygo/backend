@@ -58,6 +58,9 @@ export const users = pgTable(
     privacyAcceptedAt: timestamp('privacy_accepted_at', { withTimezone: true }),
     privacyVersion: varchar('privacy_version', { length: 20 }),
 
+    // Subscription limits
+    hasUsedTrial: boolean('has_used_trial').notNull().default(false), // Only 1 trial per email
+
     // Security
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     lastLoginIp: varchar('last_login_ip', { length: 45 }),
