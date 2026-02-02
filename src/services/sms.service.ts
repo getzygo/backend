@@ -60,7 +60,7 @@ export function isValidE164(phone: string): boolean {
 }
 
 /**
- * Get Twilio client
+ * Get Twilio client for general SMS (supports API keys)
  */
 async function getTwilioClient() {
   const env = getEnv();
@@ -74,6 +74,17 @@ async function getTwilioClient() {
     });
   }
 
+  return twilio.default(env.TWILIO_ACCOUNT_SID!, env.TWILIO_AUTH_TOKEN!);
+}
+
+/**
+ * Get Twilio client for Verify API (requires Auth Token, not API keys)
+ */
+async function getTwilioVerifyClient() {
+  const env = getEnv();
+  const twilio = await import('twilio');
+
+  // Verify API requires Account SID + Auth Token (API keys may not have Verify permissions)
   return twilio.default(env.TWILIO_ACCOUNT_SID!, env.TWILIO_AUTH_TOKEN!);
 }
 
@@ -102,7 +113,7 @@ async function sendViaVerifyApi(phone: string): Promise<{ sent: boolean; expires
   const env = getEnv();
 
   try {
-    const client = await getTwilioClient();
+    const client = await getTwilioVerifyClient();
 
     await client.verify.v2
       .services(env.TWILIO_VERIFY_SERVICE_SID!)
@@ -130,7 +141,7 @@ async function verifyViaVerifyApi(phone: string, code: string): Promise<{ verifi
   const env = getEnv();
 
   try {
-    const client = await getTwilioClient();
+    const client = await getTwilioVerifyClient();
 
     const verification = await client.verify.v2
       .services(env.TWILIO_VERIFY_SERVICE_SID!)
