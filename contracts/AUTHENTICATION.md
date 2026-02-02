@@ -1,7 +1,7 @@
 # Zygo Authentication Strategy
 
-**Version:** 1.1.0
-**Last Updated:** January 26, 2026
+**Version:** 1.2.0
+**Last Updated:** February 1, 2026
 **Status:** Production-Ready
 
 ---
@@ -3824,7 +3824,396 @@ export default function AuthCallbackPage() {
 
 ---
 
+## Cross-Domain Authentication (Opaque Tokens)
+
+### Overview
+
+Zygo uses a secure **opaque token** system for cross-domain authentication when redirecting users from the landing app (`getzygo.com`) to tenant workspaces (`{tenant}.zygo.tech`). This approach prevents token exposure in URLs and ensures secure single-use authentication.
+
+### Why Opaque Tokens?
+
+Traditional approaches have security concerns:
+
+| Approach | Risk |
+|----------|------|
+| JWT in URL | Token visible in browser history, logs, referer headers |
+| Cookie-based | Cross-domain cookies blocked by modern browsers |
+| URL parameters | Tokens cached by proxies, logged by servers |
+
+**Opaque tokens** solve these issues:
+- **Cryptographically random**: 32 bytes encoded as base64url, not guessable
+- **Server-side storage**: Actual user data stored in Redis, only opaque reference in URL
+- **Single-use**: Token deleted immediately after verification
+- **Short-lived**: 2-minute TTL prevents replay attacks
+- **No sensitive data**: URL only contains meaningless token string
+
+### Token Flow
+
+```
+┌──────────────┐      ┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│   Landing    │      │   Backend   │      │    Redis    │      │   Tenant    │
+│   (login)    │      │     API     │      │             │      │     App     │
+└──────┬───────┘      └──────┬──────┘      └──────┬──────┘      └──────┬──────┘
+       │                     │                    │                    │
+       │ 1. POST /auth/login │                    │                    │
+       │ {email, password}   │                    │                    │
+       │────────────────────>│                    │                    │
+       │                     │                    │                    │
+       │                     │ 2. Verify user,    │                    │
+       │                     │    fetch role      │                    │
+       │                     │                    │                    │
+       │                     │ 3. Generate token  │                    │
+       │                     │    (32 bytes)      │                    │
+       │                     │                    │                    │
+       │                     │ 4. Store in Redis  │                    │
+       │                     │    (2-min TTL)     │                    │
+       │                     │───────────────────>│                    │
+       │                     │                    │                    │
+       │ 5. Return {         │                    │                    │
+       │      auth_token,    │                    │                    │
+       │      redirect_url   │                    │                    │
+       │    }                │                    │                    │
+       │<────────────────────│                    │                    │
+       │                     │                    │                    │
+       │ 6. Redirect to:     │                    │                    │
+       │    {tenant}.zygo.tech?auth_token=xxx     │                    │
+       │──────────────────────────────────────────────────────────────>│
+       │                     │                    │                    │
+       │                     │<───────────────────────────────────────│
+       │                     │ 7. POST /auth/verify-token             │
+       │                     │    {token: "xxx"}                      │
+       │                     │                    │                    │
+       │                     │ 8. GET token       │                    │
+       │                     │    from Redis      │                    │
+       │                     │───────────────────>│                    │
+       │                     │                    │                    │
+       │                     │ 9. DELETE token    │                    │
+       │                     │    (atomic)        │                    │
+       │                     │───────────────────>│                    │
+       │                     │                    │                    │
+       │                     │ 10. Resolve        │                    │
+       │                     │     permissions    │                    │
+       │                     │                    │                    │
+       │                     │ 11. Return {user, tenant, role, permissions}
+       │                     │───────────────────────────────────────>│
+       │                     │                    │                    │
+       │                     │                    │    12. Store user  │
+       │                     │                    │        session     │
+       │                     │                    │    13. Render app  │
+       │                     │                    │                    │
+```
+
+### Token Payload Structure
+
+The token is an opaque string (e.g., `Abc123XyzRandomBase64UrlEncoded...`), but internally it references a payload stored in Redis:
+
+```typescript
+interface AuthTokenPayload {
+  // User identity
+  userId: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  avatarUrl?: string | null;
+  emailVerifiedVia?: string | null;
+
+  // Tenant context
+  tenantId: string;
+
+  // RBAC data (resolved at token creation)
+  roleId: string;
+  roleName: string;
+  roleSlug: string;
+  isOwner: boolean;
+
+  // Token metadata
+  createdAt: number;  // Unix timestamp
+}
+```
+
+### Token Service Implementation
+
+```typescript
+// services/auth-token.service.ts
+import { randomBytes } from 'crypto';
+import { getRedis, REDIS_KEYS, REDIS_TTL } from '../db/redis';
+
+/**
+ * Generate a cryptographically secure random token
+ */
+function generateSecureToken(): string {
+  return randomBytes(32).toString('base64url');  // 43 characters
+}
+
+/**
+ * Create and store an auth token
+ */
+export async function createAuthToken(
+  payload: Omit<AuthTokenPayload, 'createdAt'>
+): Promise<string> {
+  const redis = getRedis();
+  const token = generateSecureToken();
+  const key = `${REDIS_KEYS.AUTH_TOKEN}${token}`;
+
+  const data: AuthTokenPayload = {
+    ...payload,
+    createdAt: Date.now(),
+  };
+
+  // Store with 2-minute TTL
+  await redis.setex(key, REDIS_TTL.AUTH_TOKEN, JSON.stringify(data));
+
+  return token;
+}
+
+/**
+ * Verify and consume an auth token (single-use)
+ */
+export async function verifyAuthToken(
+  token: string
+): Promise<AuthTokenPayload | null> {
+  if (!token || typeof token !== 'string') {
+    return null;
+  }
+
+  const redis = getRedis();
+  const key = `${REDIS_KEYS.AUTH_TOKEN}${token}`;
+
+  // Get and delete atomically using a transaction
+  const multi = redis.multi();
+  multi.get(key);
+  multi.del(key);
+
+  const results = await multi.exec();
+
+  if (!results || !results[0] || !results[0][1]) {
+    return null;
+  }
+
+  const data = results[0][1] as string;
+
+  try {
+    const payload = JSON.parse(data) as AuthTokenPayload;
+
+    // Double-check expiration (Redis TTL should handle this, but be safe)
+    const age = Date.now() - payload.createdAt;
+    if (age > REDIS_TTL.AUTH_TOKEN * 1000) {
+      return null;
+    }
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
+```
+
+### Verification Endpoint
+
+The tenant app calls this endpoint to verify the token and get user/tenant/role information:
+
+```typescript
+// POST /api/v1/auth/verify-token
+interface VerifyTokenRequest {
+  token: string;
+}
+
+interface VerifyTokenResponse {
+  verified: true;
+  user: {
+    id: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    avatarUrl?: string | null;
+    emailVerifiedVia?: string | null;
+  };
+  tenant: {
+    id: string;
+    name: string;
+    slug: string;
+    type: string;
+    plan: string;
+    logoUrl?: string;
+    primaryColor?: string;
+  };
+  role: {
+    id: string;
+    name: string;
+    slug: string;
+    isOwner: boolean;
+  };
+  permissions: string[];  // Array of permission keys
+}
+```
+
+**Security Notes:**
+- No authentication required (the token IS the authentication)
+- Token can only be used once (deleted after GET)
+- Returns full user context including resolved permissions
+- Tenant status is validated (rejects suspended/inactive tenants)
+
+### RBAC Integration
+
+Auth tokens include RBAC data resolved at creation time:
+
+1. **Token Creation** (during login/OAuth):
+   - Fetch user's primary role for the target tenant
+   - Include role ID, name, slug, and isOwner flag in token payload
+
+2. **Token Verification**:
+   - Resolve user's full permissions using `resolvePermissions(userId, tenantId)`
+   - Returns array of permission keys (e.g., `["canManageUsers", "canViewBilling", ...]`)
+   - Permissions are the union of all user's roles (primary + secondary)
+
+3. **Frontend Storage**:
+   - Tenant app stores role info in `tenantStorage` (prefixed localStorage)
+   - Permissions stored as array for efficient lookup
+   - UserContext provides `permissions` object and `hasPermission()` helper
+
+```typescript
+// Tenant app: App.tsx token verification
+const response = await fetch(`${API_BASE_URL}/auth/verify-token`, {
+  method: 'POST',
+  body: JSON.stringify({ token }),
+});
+
+if (response.ok) {
+  const data = await response.json();
+
+  // Store role info
+  tenantStorage.set('user_role', JSON.stringify({
+    id: data.role.id,
+    name: data.role.name,
+    slug: data.role.slug,
+    isOwner: data.role.isOwner,
+  }));
+
+  // Store resolved permissions
+  tenantStorage.set('user_permissions', JSON.stringify(data.permissions));
+}
+```
+
+### Tenant Switching
+
+Users with multiple tenant memberships can switch between workspaces:
+
+```typescript
+// POST /api/v1/auth/switch-tenant
+interface SwitchTenantRequest {
+  tenant_slug: string;
+}
+
+interface SwitchTenantResponse {
+  auth_token: string;
+  redirect_url: string;  // e.g., "https://acme.zygo.tech?auth_token=xxx"
+}
+```
+
+**Flow:**
+1. User is authenticated in current tenant
+2. Calls `POST /auth/switch-tenant` with target tenant slug
+3. Backend verifies user is a member of target tenant
+4. Creates new auth token with target tenant context
+5. Frontend redirects to target tenant with new token
+
+**Security:**
+- Requires valid authentication (authMiddleware)
+- Verifies tenant membership before creating token
+- Creates fresh token (doesn't reuse existing)
+- Audit logged for security tracking
+
+### Redis Keys and TTL
+
+```typescript
+// db/redis.ts
+export const REDIS_KEYS = {
+  AUTH_TOKEN: 'auth_token:',  // Key prefix for auth tokens
+  // ... other keys
+};
+
+export const REDIS_TTL = {
+  AUTH_TOKEN: 120,  // 2 minutes in seconds
+  // ... other TTLs
+};
+```
+
+### Security Considerations
+
+| Threat | Mitigation |
+|--------|------------|
+| Token replay | Single-use (deleted after verification) |
+| Token guessing | 32 bytes of cryptographic randomness (256 bits) |
+| Token expiration | 2-minute TTL + timestamp validation |
+| Token in logs | Only opaque reference logged, not user data |
+| Cross-tenant access | Tenant ID embedded in token, verified on use |
+| Man-in-the-middle | HTTPS required for all domains |
+
+### Audit Logging
+
+All token operations are logged:
+
+```typescript
+// On token verification
+await db.insert(auditLogs).values({
+  userId: payload.userId,
+  action: 'token_verified',
+  resourceType: 'auth_token',
+  resourceId: payload.tenantId,
+  details: {
+    tenant_slug: tenant.slug,
+    role_slug: payload.roleSlug,
+  },
+  ipAddress,
+  userAgent,
+  status: 'success',
+});
+
+// On tenant switch
+await db.insert(auditLogs).values({
+  userId: user.id,
+  action: 'tenant_switch',
+  resourceType: 'tenant',
+  resourceId: targetTenant.id,
+  details: {
+    from_tenant: currentTenantSlug,
+    to_tenant: targetTenant.slug,
+  },
+  status: 'success',
+});
+```
+
+---
+
 ## Changelog
+
+### v1.2.0 (February 1, 2026)
+
+- **Cross-Domain Authentication**
+  - Secure opaque token system for cross-domain redirects
+  - 32-byte cryptographically random tokens
+  - Redis storage with 2-minute TTL
+  - Single-use tokens (atomic GET + DELETE)
+  - Server-side payload storage (no sensitive data in URLs)
+
+- **RBAC Integration with Auth Tokens**
+  - Auth tokens include user's role data (ID, name, slug, isOwner)
+  - Token verification resolves full user permissions
+  - Permissions returned as array of keys for frontend use
+  - Frontend stores role and permissions in tenant-prefixed storage
+
+- **Tenant Switching**
+  - New endpoint: POST `/auth/switch-tenant`
+  - Authenticated users can switch between their tenants
+  - Creates fresh auth token for target tenant
+  - Full audit trail for security compliance
+
+- **New API Endpoints**
+  - POST `/auth/verify-token` - Verify and consume opaque auth token
+  - POST `/auth/switch-tenant` - Switch to different tenant workspace
+
+- **New Services**
+  - `auth-token.service.ts` - Token generation, storage, verification
 
 ### v1.1.0 (January 26, 2026)
 

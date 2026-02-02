@@ -1,6 +1,7 @@
 # Zygo RBAC Contract
 
-**Version:** 2.1
+**Version:** 2.2
+**Last Updated:** February 1, 2026
 **Total Permissions:** 114
 **System Roles:** 6 (owner, admin, billing_admin, developer, member, viewer)
 **Custom Roles:** Unlimited per tenant
@@ -1024,3 +1025,168 @@ interface RoleAuditEvent {
 - [ ] Audit all permission changes
 - [ ] Rate limiting on role operations
 - [ ] Validate permission keys against catalog
+
+---
+
+## Authentication Integration
+
+### Role Data in Auth Tokens
+
+When users authenticate (login, OAuth, or tenant switch), their role information is embedded in the opaque auth token:
+
+```typescript
+// Auth token payload includes RBAC data
+interface AuthTokenPayload {
+  userId: string;
+  tenantId: string;
+  email: string;
+  // ... other user fields
+
+  // RBAC data (resolved at token creation)
+  roleId: string;      // Primary role UUID
+  roleName: string;    // e.g., "Admin", "Developer", "Custom Role"
+  roleSlug: string;    // e.g., "admin", "developer", "custom-role"
+  isOwner: boolean;    // true if user is tenant owner
+}
+```
+
+### Permission Resolution
+
+When the tenant app verifies the auth token, the backend resolves the user's complete permission set:
+
+```typescript
+// POST /auth/verify-token response
+{
+  "verified": true,
+  "user": { /* user info */ },
+  "tenant": { /* tenant info */ },
+  "role": {
+    "id": "role_123",
+    "name": "Developer",
+    "slug": "developer",
+    "isOwner": false
+  },
+  "permissions": [
+    "canViewServers",
+    "canCreateServers",
+    "canManageServers",
+    "canViewVolumes",
+    // ... all permissions the user has
+  ]
+}
+```
+
+**Permission Resolution Process:**
+
+1. Get user's primary role for the tenant
+2. Get user's secondary roles (if any)
+3. Collect permissions from all roles
+4. Return union of all permission keys
+
+```typescript
+// services/permission.service.ts
+export async function resolvePermissions(
+  userId: string,
+  tenantId: string
+): Promise<string[]> {
+  // Get all user's roles in this tenant
+  const membership = await db.query.tenantMembers.findFirst({
+    where: and(
+      eq(tenantMembers.userId, userId),
+      eq(tenantMembers.tenantId, tenantId)
+    ),
+    with: {
+      primaryRole: true,
+      secondaryRoles: {
+        with: { role: true }
+      }
+    }
+  });
+
+  if (!membership) return [];
+
+  // Collect permissions from all roles
+  const allPermissions = new Set<string>();
+
+  // Add primary role permissions
+  membership.primaryRole.permissions.forEach(p => allPermissions.add(p));
+
+  // Add secondary role permissions
+  membership.secondaryRoles?.forEach(sr => {
+    sr.role.permissions.forEach(p => allPermissions.add(p));
+  });
+
+  return Array.from(allPermissions);
+}
+```
+
+### Frontend Permission Storage
+
+The tenant app stores permissions for efficient UI checks:
+
+```typescript
+// After token verification
+tenantStorage.set('user_role', JSON.stringify({
+  id: data.role.id,
+  name: data.role.name,
+  slug: data.role.slug,
+  isOwner: data.role.isOwner,
+}));
+
+tenantStorage.set('user_permissions', JSON.stringify(data.permissions));
+
+// UserContext loads and provides permissions
+const { permissions } = useUser();
+if (permissions.canManageUsers) {
+  // Show user management
+}
+```
+
+### Permission Caching
+
+Resolved permissions are cached in Redis for performance:
+
+```typescript
+// Cache key pattern
+const cacheKey = `zygo:cache:tenant:${tenantId}:user:${userId}:permissions`;
+
+// TTL: 5 minutes (invalidated on role change)
+const cacheTTL = 300;
+
+// Invalidation on role/permission change
+async function onRoleChanged(tenantId: string, roleId: string) {
+  // Get all users with this role
+  const usersWithRole = await getUsersWithRole(roleId);
+
+  // Clear their permission caches
+  for (const userId of usersWithRole) {
+    await redis.del(`zygo:cache:tenant:${tenantId}:user:${userId}:permissions`);
+  }
+}
+```
+
+---
+
+## Changelog
+
+### v2.1 (February 1, 2026)
+
+- **Authentication Integration**
+  - Documented role data in auth tokens
+  - Added permission resolution process
+  - Frontend permission storage patterns
+  - Permission caching with Redis
+
+- **Custom Role Management**
+  - Clarified unlimited custom roles per tenant
+  - Documented role create/edit/delete APIs
+  - Role duplication for creating variations
+  - Role deletion safeguards (no members required)
+
+### v2.0 (January 26, 2026)
+
+- Initial granular RBAC specification
+- 114 permissions across 20 categories
+- 6 system role definitions
+- Role hierarchy and assignment rules
+- Audit logging requirements

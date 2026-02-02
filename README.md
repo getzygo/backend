@@ -38,11 +38,36 @@ npm run dev
 
 Base URL: `https://api.zygo.tech/api/v1`
 
+### Core Endpoints
+
 | Endpoint | Description |
 |----------|-------------|
 | `GET /health` | Health check |
-| `POST /auth/login` | User authentication |
 | `GET /tenants/:slug/config` | Tenant configuration |
+| `GET /tenants` | Get user's tenants (authenticated) |
+
+### Authentication
+
+| Endpoint | Description |
+|----------|-------------|
+| `POST /auth/signin` | Email/password login |
+| `POST /auth/signup` | Create new account + tenant |
+| `POST /auth/verify-token` | Verify opaque auth token (cross-domain) |
+| `POST /auth/switch-tenant` | Switch to different tenant workspace |
+| `GET /auth/oauth/:provider` | Initiate OAuth flow |
+| `GET /auth/oauth/:provider/callback` | OAuth callback handler |
+
+### Cross-Domain Authentication
+
+Zygo uses secure opaque tokens for authentication across domains:
+
+1. User logs in at `getzygo.com`
+2. Backend creates short-lived token (2-min TTL) stored in Redis
+3. User redirected to `{tenant}.zygo.tech?auth_token=xxx`
+4. Tenant app verifies token via `POST /auth/verify-token`
+5. Token consumed (single-use) and user session established
+
+See `contracts/AUTHENTICATION.md` for detailed documentation.
 
 See `contracts/api_contract.yaml` for full API specification.
 

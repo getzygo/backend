@@ -1,7 +1,7 @@
 # Zygo Multi-Tenant Architecture
 
-**Version:** 2.0
-**Last Updated:** January 26, 2026
+**Version:** 2.1
+**Last Updated:** February 1, 2026
 **Status:** Production-Ready
 
 This document defines the multi-tenant architecture for the Zygo platform, including mode detection, tenant isolation, and data segregation strategies.
@@ -20,6 +20,7 @@ This document defines the multi-tenant architecture for the Zygo platform, inclu
 8. [Database Tenancy](#database-tenancy)
 9. [Caching Strategy](#caching-strategy)
 10. [Security Considerations](#security-considerations)
+11. [Tenant Switching](#tenant-switching)
 
 ---
 
@@ -661,7 +662,180 @@ if (user.isGlobalAdmin && targetTenantId !== user.tenantId) {
 
 ---
 
+## Tenant Switching
+
+### Multi-Tenant Users
+
+Users can be members of multiple tenants with different roles in each:
+
+```sql
+-- Example: User belongs to 3 tenants
+SELECT t.name, t.slug, r.name as role, tm.is_owner
+FROM tenant_members tm
+JOIN tenants t ON tm.tenant_id = t.id
+JOIN roles r ON tm.primary_role_id = r.id
+WHERE tm.user_id = 'user_123' AND tm.status = 'active';
+
+-- Result:
+-- Acme Corp    | acme     | Owner    | true
+-- Startup Inc  | startup  | Admin    | false
+-- Personal     | personal | Owner    | true
+```
+
+### Tenant Selection Flow
+
+When a user with multiple tenants logs in:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                       USER LOGS IN                            │
+└─────────────────────────────┬────────────────────────────────┘
+                              │
+             ┌────────────────┼────────────────┐
+             │                │                │
+    ┌────────▼────────┐ ┌────▼─────┐ ┌────────▼────────┐
+    │   0 Tenants     │ │ 1 Tenant │ │   2+ Tenants    │
+    │ → Onboarding    │ │ → Direct │ │ → Select Page   │
+    └─────────────────┘ │  Redirect│ └────────┬────────┘
+                        └──────────┘          │
+                                     ┌────────▼────────┐
+                                     │ Select Workspace │
+                                     │ /select-workspace│
+                                     └────────┬────────┘
+                                              │
+                                     ┌────────▼────────┐
+                                     │ User Selects    │
+                                     │ → Auth token    │
+                                     │ → Redirect      │
+                                     └─────────────────┘
+```
+
+### API Response for Multi-Tenant Users
+
+```typescript
+// POST /api/v1/auth/signin response for multi-tenant user
+{
+  "user": {
+    "id": "user_123",
+    "email": "user@example.com"
+  },
+  "tenants": [
+    {
+      "id": "tenant_1",
+      "name": "Acme Corp",
+      "slug": "acme",
+      "logoUrl": "https://...",
+      "role": {
+        "id": "role_1",
+        "name": "Owner",
+        "slug": "owner",
+        "isOwner": true
+      }
+    },
+    {
+      "id": "tenant_2",
+      "name": "Startup Inc",
+      "slug": "startup",
+      "logoUrl": null,
+      "role": {
+        "id": "role_2",
+        "name": "Admin",
+        "slug": "admin",
+        "isOwner": false
+      }
+    }
+  ],
+  "redirect_url": "https://getzygo.com/select-workspace"
+}
+```
+
+### Switching Between Tenants
+
+Authenticated users can switch to another tenant they belong to:
+
+```typescript
+// POST /api/v1/auth/switch-tenant
+// Requires: Authentication (must be logged into a tenant)
+
+interface SwitchTenantRequest {
+  tenant_slug: string;
+}
+
+interface SwitchTenantResponse {
+  auth_token: string;
+  redirect_url: string;
+}
+
+// Flow:
+// 1. Verify user is authenticated
+// 2. Verify user is member of target tenant
+// 3. Fetch user's role in target tenant
+// 4. Create opaque auth token with target tenant context
+// 5. Return token and redirect URL
+```
+
+### Frontend Implementation
+
+```typescript
+// Header.tsx - TenantSwitcher component
+async function handleTenantSwitch(targetSlug: string) {
+  // 1. Call switch-tenant API
+  const response = await fetch(`${API_BASE_URL}/auth/switch-tenant`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${getAccessToken()}`,
+    },
+    body: JSON.stringify({ tenant_slug: targetSlug }),
+  });
+
+  if (response.ok) {
+    const { redirect_url } = await response.json();
+    // 2. Redirect to new tenant (clears current session)
+    window.location.href = redirect_url;
+  }
+}
+```
+
+### Session Isolation
+
+Each tenant workspace maintains its own session:
+
+- **localStorage**: Prefixed with `zygo:tenant:{slug}:*`
+- **sessionStorage**: Contains `available_tenants` for selection
+- **Cookies**: Scoped to subdomain when possible
+
+Switching tenants:
+1. Creates new auth token for target tenant
+2. Redirects to target tenant's subdomain
+3. Target tenant verifies token and creates new session
+4. Old tenant's session remains until manually logged out
+
+### Security Considerations
+
+| Concern | Mitigation |
+|---------|------------|
+| Unauthorized tenant access | Membership verified before token creation |
+| Cross-tenant data exposure | Complete session isolation per tenant |
+| Token reuse across tenants | Tenant ID embedded in token, verified on use |
+| Audit trail | All switches logged with source/target tenant |
+
+---
+
 ## Changelog
+
+### v2.1.0 (February 1, 2026)
+
+- **Tenant Switching**
+  - Multi-tenant user support documentation
+  - Tenant selection flow for users with 2+ tenants
+  - Switch-tenant API endpoint documentation
+  - Session isolation between tenants
+  - Security considerations for tenant switching
+
+- **Cross-Domain Authentication**
+  - References to new opaque token system in AUTHENTICATION.md
+  - Updated authentication flow diagrams
 
 ### v2.0.0 (January 26, 2026)
 
