@@ -893,6 +893,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         roleName: tenantResult.ownerRole.name,
         roleSlug: tenantResult.ownerRole.slug,
         isOwner: tenantResult.membership.isOwner,
+        supabaseAccessToken: accessToken,
       });
 
       // Check verification status - users can access dashboard during grace period
@@ -938,10 +939,15 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
     // Get avatar from OAuth provider
     const avatarUrl = userMeta.avatar_url || userMeta.picture;
 
+    // Get the external provider's user ID (e.g., Google's sub claim)
+    // This is stored in user_metadata.sub by Supabase
+    const externalProviderUserId = userMeta.sub || userMeta.provider_id || supabaseUser.id;
+
     // Create user and tenant using signupWithOAuth
     const result = await signupWithOAuth({
       provider,
-      providerUserId: supabaseUser.id,
+      supabaseUserId: supabaseUser.id, // Supabase auth.users UUID - for public.users.id
+      providerUserId: externalProviderUserId, // External OAuth provider ID - for social_logins
       email: supabaseUser.email!,
       firstName: body.first_name || derivedFirstName,
       lastName: body.last_name || derivedLastName,
@@ -983,6 +989,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       roleName: result.role.name,
       roleSlug: result.role.slug,
       isOwner: true, // New signup = owner
+      supabaseAccessToken: accessToken,
     });
 
     // Check if user needs to complete profile verification

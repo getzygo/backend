@@ -19,6 +19,7 @@ import {
   extractStoragePath,
   isExternalAvatarUrl,
   downloadAndStoreAvatar,
+  uploadAvatar,
   deleteOldAvatars,
 } from '../services/avatar.service';
 
@@ -173,6 +174,107 @@ app.get('/me/avatar', authMiddleware, async (c) => {
     has_avatar: true,
     expires_in: 3600, // 1 hour
   });
+});
+
+/**
+ * POST /api/v1/users/me/avatar
+ * Upload avatar for current user
+ * Accepts multipart/form-data with 'avatar' file field
+ */
+app.post('/me/avatar', authMiddleware, async (c) => {
+  const user = c.get('user');
+  const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const userAgent = c.req.header('user-agent');
+
+  try {
+    // Parse multipart form data
+    const formData = await c.req.formData();
+    const file = formData.get('avatar') as File | null;
+
+    if (!file) {
+      return c.json(
+        { error: 'no_file', message: 'No avatar file provided' },
+        400
+      );
+    }
+
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      return c.json(
+        { error: 'invalid_type', message: 'Invalid file type. Allowed: JPEG, PNG, GIF, WebP' },
+        400
+      );
+    }
+
+    // Validate file size (5MB max)
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      return c.json(
+        { error: 'file_too_large', message: 'File too large. Maximum size is 5MB' },
+        400
+      );
+    }
+
+    // Get file buffer
+    const buffer = await file.arrayBuffer();
+
+    // Upload via service (uses service role key)
+    const { path, error: uploadError } = await uploadAvatar(user.id, buffer, file.type);
+
+    if (uploadError || !path) {
+      console.error('[Users] Avatar upload failed:', uploadError);
+      return c.json(
+        { error: 'upload_failed', message: uploadError || 'Failed to upload avatar' },
+        500
+      );
+    }
+
+    // Update user record
+    const db = getDb();
+    const oldAvatarPath = extractStoragePath(user.avatarUrl || '');
+
+    await db
+      .update(users)
+      .set({
+        avatarUrl: path,
+        avatarSource: 'upload',
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, user.id));
+
+    // Clean up old avatar asynchronously
+    if (oldAvatarPath && oldAvatarPath !== path) {
+      deleteOldAvatars(user.id, path).catch(console.error);
+    }
+
+    // Generate signed URL for the new avatar
+    const { url: signedUrl } = await getSignedAvatarUrl(path);
+
+    // Audit log
+    await db.insert(auditLogs).values({
+      userId: user.id,
+      action: 'avatar_uploaded',
+      resourceType: 'user',
+      resourceId: user.id,
+      details: { path },
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+      status: 'success',
+    });
+
+    return c.json({
+      success: true,
+      avatar_url: signedUrl,
+      path,
+    });
+  } catch (error) {
+    console.error('[Users] Avatar upload error:', error);
+    return c.json(
+      { error: 'server_error', message: 'Failed to upload avatar' },
+      500
+    );
+  }
 });
 
 /**

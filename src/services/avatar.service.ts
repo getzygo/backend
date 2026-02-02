@@ -101,6 +101,7 @@ export async function getSignedAvatarUrl(
   expiresIn: number = SIGNED_URL_EXPIRY
 ): Promise<{ url: string; error?: string }> {
   try {
+    const env = getEnv();
     const supabase = getStorageClient();
 
     const { data, error } = await supabase.storage
@@ -112,7 +113,16 @@ export async function getSignedAvatarUrl(
       return { url: '', error: error.message };
     }
 
-    return { url: data.signedUrl };
+    // Replace internal Supabase URL with external URL for frontend access
+    // Internal: http://localhost:8000 or http://kong:8000
+    // External: https://db.zygo.tech
+    let signedUrl = data.signedUrl;
+    const externalUrl = env.SUPABASE_EXTERNAL_URL || 'https://db.zygo.tech';
+    signedUrl = signedUrl.replace(/http:\/\/localhost:8000/g, externalUrl);
+    signedUrl = signedUrl.replace(/http:\/\/kong:8000/g, externalUrl);
+    signedUrl = signedUrl.replace(/http:\/\/127\.0\.0\.1:8000/g, externalUrl);
+
+    return { url: signedUrl };
   } catch (error) {
     console.error('[AvatarService] Error creating signed URL:', error);
     return {
@@ -142,6 +152,49 @@ export function extractStoragePath(url: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Upload avatar directly from buffer/file
+ * Uses service role to bypass RLS
+ */
+export async function uploadAvatar(
+  userId: string,
+  buffer: ArrayBuffer | Buffer,
+  contentType: string = 'image/jpeg'
+): Promise<{ path: string; error?: string }> {
+  try {
+    // Determine file extension
+    let extension = 'jpg';
+    if (contentType.includes('png')) extension = 'png';
+    else if (contentType.includes('gif')) extension = 'gif';
+    else if (contentType.includes('webp')) extension = 'webp';
+
+    // Generate storage path
+    const fileName = `${userId}/avatar-${Date.now()}.${extension}`;
+
+    // Upload to Supabase Storage using service role
+    const supabase = getStorageClient();
+    const { data, error } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(fileName, buffer, {
+        contentType,
+        upsert: true,
+      });
+
+    if (error) {
+      console.error('[AvatarService] Upload error:', error);
+      return { path: '', error: error.message };
+    }
+
+    return { path: data.path };
+  } catch (error) {
+    console.error('[AvatarService] Error uploading avatar:', error);
+    return {
+      path: '',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
+  }
 }
 
 /**
@@ -186,6 +239,7 @@ export async function deleteOldAvatars(
 export const avatarService = {
   isExternalAvatarUrl,
   downloadAndStoreAvatar,
+  uploadAvatar,
   getSignedAvatarUrl,
   extractStoragePath,
   deleteOldAvatars,

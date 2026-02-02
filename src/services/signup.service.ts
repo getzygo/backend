@@ -451,7 +451,8 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
 export async function signupWithOAuth(params: {
   // OAuth data
   provider: 'google' | 'github' | 'microsoft' | 'apple';
-  providerUserId: string;
+  supabaseUserId: string; // Supabase auth.users UUID - MUST match for API auth to work
+  providerUserId: string; // External OAuth provider's user ID (e.g., Google's sub)
   email: string;
   firstName?: string;
   lastName?: string;
@@ -485,6 +486,7 @@ export async function signupWithOAuth(params: {
 }): Promise<SignupResult> {
   const {
     provider,
+    supabaseUserId,
     providerUserId,
     email,
     firstName,
@@ -554,9 +556,11 @@ export async function signupWithOAuth(params: {
   // Create everything in a transaction
   const result = await db.transaction(async (tx) => {
     // 1. Create user (email_verified=true for OAuth)
+    // IMPORTANT: Use supabaseUserId as the ID so it matches auth.users for API auth
     const [user] = await tx
       .insert(users)
       .values({
+        id: supabaseUserId, // Must match auth.users.id for Supabase JWT validation
         email: normalizedEmail,
         emailVerified: true, // OAuth verified the email
         emailVerifiedVia: provider, // Track which provider verified the email
