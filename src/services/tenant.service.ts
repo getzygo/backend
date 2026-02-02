@@ -151,7 +151,7 @@ export async function createTenant(params: {
     name,
     slug: slug.toLowerCase(),
     type,
-    plan: 'free',
+    plan: 'core',
     trialExpiresAt,
     subscriptionStatus: 'trialing',
     status: 'active',
