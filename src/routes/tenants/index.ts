@@ -599,10 +599,10 @@ app.get('/:tenantId/billing', async (c) => {
     );
   }
 
-  // Check permission (billing management)
-  const canManage = await hasPermission(user.id, tenantId, 'canManageBilling');
+  // Check permission (view billing)
+  const canView = await hasPermission(user.id, tenantId, 'canViewBillingOverview');
 
-  if (!canManage) {
+  if (!canView) {
     return c.json(
       {
         error: 'permission_denied',
@@ -675,9 +675,9 @@ app.patch(
     }
 
     // Check permission
-    const canManage = await hasPermission(user.id, tenantId, 'canManageBilling');
+    const canUpdate = await hasPermission(user.id, tenantId, 'canUpdateBillingInfo');
 
-    if (!canManage) {
+    if (!canUpdate) {
       return c.json(
         {
           error: 'permission_denied',
