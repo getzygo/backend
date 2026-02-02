@@ -13,15 +13,20 @@ import type { User } from '../db/schema';
 
 export interface VerificationStatus {
   complete: boolean;
-  missing: ('email' | 'phone' | 'mfa')[];
+  missing: ('profile' | 'email' | 'phone' | 'mfa')[];
   deadlines: {
     phone?: number; // Days remaining
     mfa?: number; // Days remaining
   };
-  nextRequiredStep: 'email' | 'phone' | 'mfa' | null;
+  nextRequiredStep: 'profile' | 'email' | 'phone' | 'mfa' | null;
 }
 
 export interface VerificationDetails {
+  profile: {
+    complete: boolean;
+    firstName: string | null;
+    lastName: string | null;
+  };
   email: {
     verified: boolean;
     address: string;
@@ -37,7 +42,7 @@ export interface VerificationDetails {
     required: boolean;
     deadlineDaysRemaining: number | null;
   };
-  nextRequiredStep: 'email' | 'phone' | 'mfa' | null;
+  nextRequiredStep: 'profile' | 'email' | 'phone' | 'mfa' | null;
 }
 
 /**
@@ -88,8 +93,21 @@ export async function invalidateTenantConfigCache(tenantId: string): Promise<voi
 }
 
 /**
+ * Check if user profile is complete (has first and last name)
+ */
+function isProfileComplete(user: User): boolean {
+  return !!(user.firstName && user.firstName.trim() && user.lastName && user.lastName.trim());
+}
+
+/**
  * Check verification status for a user in a tenant
  * Implements Section 3.5 exactly
+ *
+ * Requirements:
+ * 1. Profile (firstName, lastName) - required immediately
+ * 2. Email verification - required immediately
+ * 3. Phone verification - required within 3 days (configurable)
+ * 4. MFA - required within 7 days (configurable)
  */
 export async function checkVerificationStatus(
   user: User,
@@ -112,16 +130,25 @@ export async function checkVerificationStatus(
     nextRequiredStep: null,
   };
 
+  // Profile (firstName, lastName) - always required immediately
+  if (!isProfileComplete(user)) {
+    status.complete = false;
+    status.missing.push('profile');
+    status.nextRequiredStep = 'profile';
+  }
+
   // Email - always required immediately
   if (!user.emailVerified) {
     status.complete = false;
     status.missing.push('email');
-    status.nextRequiredStep = 'email';
+    if (!status.nextRequiredStep) {
+      status.nextRequiredStep = 'email';
+    }
   }
 
-  // Phone - if tenant requires it
+  // Phone - required within deadline (for all users including OAuth)
   if (requirePhoneVerification && !user.phoneVerified) {
-    if (accountAgeDays > phoneDeadlineDays) {
+    if (accountAgeDays >= phoneDeadlineDays) {
       // Deadline passed - required now
       status.complete = false;
       status.missing.push('phone');
@@ -134,9 +161,9 @@ export async function checkVerificationStatus(
     }
   }
 
-  // MFA - always required after deadline (per spec, MFA is always required)
-  if (!user.mfaEnabled) {
-    if (accountAgeDays > mfaDeadlineDays) {
+  // MFA - required within deadline (for all users including OAuth)
+  if (requireMfa && !user.mfaEnabled) {
+    if (accountAgeDays >= mfaDeadlineDays) {
       // Deadline passed - required now
       status.complete = false;
       status.missing.push('mfa');
@@ -179,25 +206,35 @@ export async function getVerificationDetails(
   }
 
   let mfaDaysRemaining: number | null = null;
-  if (!user.mfaEnabled) {
+  if (requireMfa && !user.mfaEnabled) {
     const remaining = mfaDeadlineDays - accountAgeDays;
     if (remaining > 0) {
       mfaDaysRemaining = remaining;
     }
   }
 
-  // Determine next required step
-  let nextRequiredStep: 'email' | 'phone' | 'mfa' | null = null;
+  // Profile completion check
+  const profileComplete = isProfileComplete(user);
 
-  if (!user.emailVerified) {
+  // Determine next required step (in priority order)
+  let nextRequiredStep: 'profile' | 'email' | 'phone' | 'mfa' | null = null;
+
+  if (!profileComplete) {
+    nextRequiredStep = 'profile';
+  } else if (!user.emailVerified) {
     nextRequiredStep = 'email';
-  } else if (requirePhoneVerification && !user.phoneVerified && accountAgeDays > phoneDeadlineDays) {
+  } else if (requirePhoneVerification && !user.phoneVerified && accountAgeDays >= phoneDeadlineDays) {
     nextRequiredStep = 'phone';
-  } else if (!user.mfaEnabled && accountAgeDays > mfaDeadlineDays) {
+  } else if (requireMfa && !user.mfaEnabled && accountAgeDays >= mfaDeadlineDays) {
     nextRequiredStep = 'mfa';
   }
 
   return {
+    profile: {
+      complete: profileComplete,
+      firstName: user.firstName || null,
+      lastName: user.lastName || null,
+    },
     email: {
       verified: user.emailVerified,
       address: user.email,

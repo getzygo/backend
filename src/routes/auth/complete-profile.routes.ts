@@ -34,7 +34,17 @@ app.get('/verification-status', authMiddleware, optionalTenantMiddleware, async 
 
   if (!tenantId) {
     // User has no tenants - return basic status
+    const profileComplete = !!(user.firstName && user.firstName.trim() && user.lastName && user.lastName.trim());
+    let nextStep: 'profile' | 'email' | 'phone' | 'mfa' | null = null;
+    if (!profileComplete) nextStep = 'profile';
+    else if (!user.emailVerified) nextStep = 'email';
+
     return c.json({
+      profile: {
+        complete: profileComplete,
+        first_name: user.firstName || null,
+        last_name: user.lastName || null,
+      },
       email: {
         verified: user.emailVerified,
         address: user.email,
@@ -50,13 +60,18 @@ app.get('/verification-status', authMiddleware, optionalTenantMiddleware, async 
         required: true,
         deadline_days_remaining: null,
       },
-      next_required_step: !user.emailVerified ? 'email' : null,
+      next_required_step: nextStep,
     });
   }
 
   const details = await getVerificationDetails(user, tenantId);
 
   return c.json({
+    profile: {
+      complete: details.profile.complete,
+      first_name: details.profile.firstName,
+      last_name: details.profile.lastName,
+    },
     email: {
       verified: details.email.verified,
       address: details.email.address,

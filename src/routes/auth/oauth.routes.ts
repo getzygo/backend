@@ -949,6 +949,10 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         isOwner: tenantResult.membership.isOwner,
       });
 
+      // For existing users creating a new tenant, check if they need to complete verification
+      // Phone and MFA are still required for all users
+      const needsVerification = !existingUser.phoneVerified || !existingUser.mfaEnabled;
+
       return c.json(
         {
           success: true,
@@ -962,7 +966,10 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
           tenant: tenantResult.tenant,
           role: tenantResult.ownerRole,
           auth_token: authToken,
-          redirect_url: `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`,
+          redirect_url: needsVerification
+            ? '/complete-profile'
+            : `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`,
+          dashboard_url: `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`,
         },
         201
       );
@@ -1027,6 +1034,8 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       isOwner: true, // New signup = owner
     });
 
+    // After signup, redirect to complete-profile for phone verification and MFA setup
+    // The auth token is included so the complete-profile page can authenticate API calls
     return c.json(
       {
         success: true,
@@ -1034,7 +1043,9 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         tenant: result.tenant,
         role: result.role,
         auth_token: authToken,
-        redirect_url: `https://${result.tenant.slug}.zygo.tech?auth_token=${authToken}`,
+        redirect_url: '/complete-profile',
+        // Include dashboard URL for after profile completion
+        dashboard_url: `https://${result.tenant.slug}.zygo.tech?auth_token=${authToken}`,
       },
       201
     );
