@@ -86,6 +86,7 @@ export interface SignupResult {
     emailVerified: boolean;
     phoneVerified: boolean;
     mfaEnabled: boolean;
+    createdAt: Date;
   };
   tenant: {
     id: string;
@@ -399,6 +400,7 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
       emailVerified: result.user.emailVerified,
       phoneVerified: result.user.phoneVerified,
       mfaEnabled: result.user.mfaEnabled,
+      createdAt: result.user.createdAt,
     },
     tenant: {
       id: result.tenant.id,
@@ -673,6 +675,7 @@ export async function signupWithOAuth(params: {
       emailVerified: result.user.emailVerified,
       phoneVerified: result.user.phoneVerified,
       mfaEnabled: result.user.mfaEnabled,
+      createdAt: result.user.createdAt,
     },
     tenant: {
       id: result.tenant.id,

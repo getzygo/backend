@@ -11,6 +11,26 @@ import { getRedis, REDIS_KEYS, REDIS_TTL } from '../db/redis';
 import { tenantSecurityConfig, type TenantSecurityConfig } from '../db/schema';
 import type { User } from '../db/schema';
 
+/**
+ * Minimal user fields required for verification status check
+ */
+export interface VerificationUser {
+  firstName: string | null;
+  lastName: string | null;
+  createdAt: Date;
+  emailVerified: boolean;
+  phoneVerified: boolean;
+  mfaEnabled: boolean;
+}
+
+/**
+ * Extended user fields for verification details (includes display fields)
+ */
+export interface VerificationUserDetails extends VerificationUser {
+  email: string;
+  phone: string | null;
+}
+
 export interface VerificationStatus {
   complete: boolean;
   missing: ('profile' | 'email' | 'phone' | 'mfa')[];
@@ -95,7 +115,7 @@ export async function invalidateTenantConfigCache(tenantId: string): Promise<voi
 /**
  * Check if user profile is complete (has first and last name)
  */
-function isProfileComplete(user: User): boolean {
+function isProfileComplete(user: VerificationUser): boolean {
   return !!(user.firstName && user.firstName.trim() && user.lastName && user.lastName.trim());
 }
 
@@ -110,7 +130,7 @@ function isProfileComplete(user: User): boolean {
  * 4. MFA - required within 7 days (configurable)
  */
 export async function checkVerificationStatus(
-  user: User,
+  user: VerificationUser,
   tenantId: string
 ): Promise<VerificationStatus> {
   const config = await getTenantSecurityConfig(tenantId);
@@ -184,7 +204,7 @@ export async function checkVerificationStatus(
  * Implements Section 3.4 UI data
  */
 export async function getVerificationDetails(
-  user: User,
+  user: VerificationUserDetails,
   tenantId: string
 ): Promise<VerificationDetails> {
   const config = await getTenantSecurityConfig(tenantId);
