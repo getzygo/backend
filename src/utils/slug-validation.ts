@@ -39,6 +39,7 @@ export function isBlockedSlug(slug: string): boolean {
   const technicalTerms = [
     'api', 'api-v1', 'api-v2', 'graphql', 'rest', 'webhook', 'webhooks',
     'www', 'web', 'mobile', 'ios', 'android', 'desktop',
+    'get', 'post', 'put', 'patch', 'delete', 'head', 'options', // HTTP methods
     'help', 'support', 'contact', 'feedback', 'report', 'abuse',
     'blog', 'news', 'press', 'media', 'docs', 'documentation', 'wiki',
     'status', 'health', 'ping', 'metrics', 'monitor', 'monitoring',

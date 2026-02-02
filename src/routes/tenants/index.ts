@@ -64,8 +64,11 @@ app.get('/:slugOrId/config', async (c) => {
   let tenant = await getTenantBySlug(slugOrId);
 
   if (!tenant) {
-    // Try by ID if not found by slug
-    tenant = await getTenantById(slugOrId);
+    // Only try by ID if it looks like a valid UUID
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (uuidRegex.test(slugOrId)) {
+      tenant = await getTenantById(slugOrId);
+    }
   }
 
   if (!tenant) {
