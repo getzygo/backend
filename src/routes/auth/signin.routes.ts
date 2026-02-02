@@ -232,6 +232,26 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
 
     // Check verification status for this tenant
     verificationStatus = await checkVerificationStatus(user, targetTenant.id);
+  } else if (userTenants.length === 0) {
+    // No tenants - redirect to onboarding to create first workspace
+    return c.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.firstName,
+        last_name: user.lastName,
+        email_verified: user.emailVerified,
+        phone_verified: user.phoneVerified,
+        mfa_enabled: user.mfaEnabled,
+      },
+      session: {
+        access_token: authResult.session.access_token,
+        refresh_token: authResult.session.refresh_token,
+        expires_at: authResult.session.expires_at,
+      },
+      redirect_url: '/onboarding',
+      message: 'Please create your first workspace',
+    });
   } else if (userTenants.length === 1) {
     // Auto-select single tenant
     targetTenant = userTenants[0].tenant;
