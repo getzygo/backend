@@ -14,6 +14,7 @@ import verifyPhoneRoutes from './verify-phone.routes';
 import mfaRoutes from './mfa.routes';
 import completeProfileRoutes from './complete-profile.routes';
 import passwordResetRoutes from './password-reset.routes';
+import changePasswordRoutes from './change-password.routes';
 import verifyTokenRoutes from './verify-token.routes';
 
 const app = new Hono();
@@ -69,12 +70,16 @@ app.route('/oauth', oauthRoutes);
 // POST /api/v1/auth/signup/oauth
 app.route('/signup', oauthLegacyRoutes);
 
-// Password reset routes
+// Password reset routes (public, unauthenticated)
 // POST /api/v1/auth/forgot-password
 // POST /api/v1/auth/verify-reset-code
 // POST /api/v1/auth/reset-password
 // GET /api/v1/auth/reset-status
 app.route('/', passwordResetRoutes);
+
+// Change password routes (authenticated)
+// POST /api/v1/auth/change-password
+app.route('/change-password', changePasswordRoutes);
 
 // Token verification routes (for cross-domain auth)
 // POST /api/v1/auth/verify-token
