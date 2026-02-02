@@ -10,6 +10,19 @@
  * GET /api/v1/tenants/:tenantId/security-config - Get security config
  * PATCH /api/v1/tenants/:tenantId/security-config - Update security config
  *
+ * Member Routes (Team Management):
+ * GET /api/v1/tenants/:tenantId/members - List members
+ * GET /api/v1/tenants/:tenantId/members/limits - Get member limits and usage
+ * POST /api/v1/tenants/:tenantId/members/invite - Invite member (enforces plan limits)
+ * PATCH /api/v1/tenants/:tenantId/members/:memberId - Update member role
+ * DELETE /api/v1/tenants/:tenantId/members/:memberId - Remove member
+ *
+ * Plan User Limits:
+ * - Core: 1 user (owner only, cannot invite)
+ * - Flow: up to 50 users
+ * - Scale: up to 200 users
+ * - Enterprise: unlimited users
+ *
  * SSO Routes (Enterprise):
  * GET /api/v1/tenants/:tenantId/sso - Get SSO config
  * PUT /api/v1/tenants/:tenantId/sso - Configure SSO
@@ -32,6 +45,7 @@ import { authMiddleware } from '../../middleware/auth.middleware';
 import { tenantMiddleware, requireTenantMembership } from '../../middleware/tenant.middleware';
 import ssoRoutes from './sso.routes';
 import domainsRoutes from './domains.routes';
+import membersRoutes from './members.routes';
 import {
   getUserTenants,
   getTenantById,
@@ -754,5 +768,8 @@ app.route('/', ssoRoutes);
 
 // Mount Domain routes (Enterprise)
 app.route('/', domainsRoutes);
+
+// Mount Member routes (Team Management)
+app.route('/', membersRoutes);
 
 export default app;
