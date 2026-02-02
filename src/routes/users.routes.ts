@@ -1,7 +1,8 @@
 /**
  * Users Routes
  *
- * PATCH /api/v1/users/me - Update current user's profile
+ * PATCH /api/v1/users/me - Update current user's profile (authenticated)
+ * PATCH /api/v1/users/me/public - Update profile during onboarding (email-based)
  * GET /api/v1/users/me - Get current user's profile
  */
 
@@ -15,11 +16,18 @@ import { users, auditLogs } from '../db/schema';
 
 const app = new Hono();
 
-// Update profile schema
+// Update profile schema (authenticated)
 const updateProfileSchema = z.object({
   first_name: z.string().min(1).max(100).optional(),
   last_name: z.string().min(1).max(100).optional(),
   avatar_url: z.string().url().optional().nullable(),
+});
+
+// Update profile schema (public - during onboarding)
+const updateProfilePublicSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  first_name: z.string().min(1, 'First name is required').max(100),
+  last_name: z.string().min(1, 'Last name is required').max(100),
 });
 
 /**
@@ -96,6 +104,68 @@ app.patch('/me', authMiddleware, zValidator('json', updateProfileSchema), async 
     email_verified: updatedUser.emailVerified,
     phone_verified: updatedUser.phoneVerified,
     mfa_enabled: updatedUser.mfaEnabled,
+    updated_at: updatedUser.updatedAt,
+  });
+});
+
+/**
+ * PATCH /api/v1/users/me/public
+ * Update user profile during onboarding (no auth required)
+ * Uses email as identifier - intended for use right after signup
+ * when user doesn't have a session yet.
+ */
+app.patch('/me/public', zValidator('json', updateProfilePublicSchema), async (c) => {
+  const body = c.req.valid('json');
+  const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const userAgent = c.req.header('user-agent');
+
+  const normalizedEmail = body.email.toLowerCase().trim();
+
+  // Find the user by email
+  const db = getDb();
+  const user = await db.query.users.findFirst({
+    where: eq(users.email, normalizedEmail),
+  });
+
+  if (!user) {
+    return c.json(
+      {
+        error: 'user_not_found',
+        message: 'No account found with this email',
+      },
+      404
+    );
+  }
+
+  // Update user profile
+  const [updatedUser] = await db
+    .update(users)
+    .set({
+      firstName: body.first_name,
+      lastName: body.last_name,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, user.id))
+    .returning();
+
+  // Audit log
+  await db.insert(auditLogs).values({
+    userId: user.id,
+    action: 'profile_updated',
+    resourceType: 'user',
+    resourceId: user.id,
+    details: { updates: ['firstName', 'lastName'], via: 'onboarding' },
+    ipAddress: ipAddress || undefined,
+    userAgent: userAgent || undefined,
+    status: 'success',
+  });
+
+  return c.json({
+    id: updatedUser.id,
+    email: updatedUser.email,
+    first_name: updatedUser.firstName,
+    last_name: updatedUser.lastName,
+    email_verified: updatedUser.emailVerified,
     updated_at: updatedUser.updatedAt,
   });
 });
