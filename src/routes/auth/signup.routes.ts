@@ -491,6 +491,87 @@ app.get('/check-email/:email', async (c) => {
   });
 });
 
+// Schema for password verification
+const verifyPasswordSchema = z.object({
+  email: z.string().email('Invalid email address'),
+  password: z.string().min(1, 'Password is required'),
+});
+
+/**
+ * POST /api/v1/auth/signup/verify-password
+ * Verify password for existing user before onboarding
+ * This allows early validation so users don't waste time in onboarding
+ */
+app.post('/verify-password', zValidator('json', verifyPasswordSchema), async (c) => {
+  const { email, password } = c.req.valid('json');
+  const normalizedEmail = email.toLowerCase().trim();
+
+  try {
+    // Import Supabase service
+    const { signInWithPassword } = await import('../../services/supabase.service');
+
+    // Check if user exists first
+    const db = getDb();
+    const existingUser = await db.query.users.findFirst({
+      where: eq(users.email, normalizedEmail),
+      columns: {
+        id: true,
+        email: true,
+        firstName: true,
+        hasUsedTrial: true,
+      },
+    });
+
+    if (!existingUser) {
+      return c.json(
+        {
+          success: false,
+          error: 'user_not_found',
+          message: 'No account found with this email',
+        },
+        404
+      );
+    }
+
+    // Verify password with Supabase
+    const authResult = await signInWithPassword(normalizedEmail, password);
+    if (authResult.error || !authResult.session) {
+      return c.json(
+        {
+          success: false,
+          error: 'invalid_password',
+          message: 'Invalid password',
+        },
+        401
+      );
+    }
+
+    // Password verified - return user info for onboarding
+    const { userHasCorePlanTenant } = await import('../../services/tenant.service');
+    const hasCorePlan = await userHasCorePlanTenant(existingUser.id);
+
+    return c.json({
+      success: true,
+      user: {
+        email: existingUser.email,
+        first_name: existingUser.firstName,
+        has_used_trial: existingUser.hasUsedTrial,
+        has_core_plan: hasCorePlan,
+      },
+    });
+  } catch (error) {
+    console.error('Password verification error:', error);
+    return c.json(
+      {
+        success: false,
+        error: 'verification_failed',
+        message: 'Password verification failed',
+      },
+      500
+    );
+  }
+});
+
 /**
  * GET /api/v1/auth/signup/plans
  * Get available plans and pricing
