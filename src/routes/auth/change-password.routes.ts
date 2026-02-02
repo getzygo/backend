@@ -17,7 +17,8 @@ import { authMiddleware } from '../../middleware/auth.middleware';
 import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
 import { verifyPassword, hashPassword } from '../../services/user.service';
-import { updateAuthUser } from '../../services/supabase.service';
+import { updateAuthUser, signOut } from '../../services/supabase.service';
+import { invalidateAuthToken } from '../../services/auth-token.service';
 
 const app = new Hono();
 
@@ -127,9 +128,21 @@ app.post('/', authMiddleware, zValidator('json', changePasswordSchema), async (c
     status: 'success',
   });
 
+  // Invalidate current session - user must re-login with new password
+  // Get the auth token from the request header
+  const authHeader = c.req.header('Authorization');
+  if (authHeader?.startsWith('Bearer ')) {
+    const token = authHeader.slice(7);
+    // Invalidate the Zygo auth token
+    await invalidateAuthToken(token).catch(console.error);
+    // Sign out from Supabase
+    await signOut(token).catch(console.error);
+  }
+
   return c.json({
     success: true,
-    message: 'Password changed successfully',
+    message: 'Password changed successfully. Please sign in with your new password.',
+    require_reauth: true,
   });
 });
 
