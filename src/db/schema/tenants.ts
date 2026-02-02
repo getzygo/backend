@@ -54,6 +54,18 @@ export const tenants = pgTable(
     subscriptionStatus: varchar('subscription_status', { length: 20 }).default('trialing'),
     // 'trialing' | 'active' | 'past_due' | 'canceled' | 'unpaid'
 
+    // Billing Information (required for paid subscriptions)
+    billingEmail: varchar('billing_email', { length: 255 }),
+    billingAddress: varchar('billing_address', { length: 255 }),
+    billingCity: varchar('billing_city', { length: 100 }),
+    billingState: varchar('billing_state', { length: 100 }),
+    billingPostalCode: varchar('billing_postal_code', { length: 20 }),
+    billingCountry: varchar('billing_country', { length: 2 }), // ISO 3166-1 alpha-2
+
+    // Company Tax Information (required for paid subscriptions)
+    companyLegalName: varchar('company_legal_name', { length: 200 }),
+    taxId: varchar('tax_id', { length: 50 }), // VAT ID, Tax ID, EIN, etc.
+
     // Branding
     logoUrl: text('logo_url'),
     primaryColor: varchar('primary_color', { length: 7 }).default('#6366f1'),

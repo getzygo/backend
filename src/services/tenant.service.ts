@@ -456,6 +456,118 @@ export async function getTenantMembershipWithRole(
   };
 }
 
+/**
+ * Billing readiness status
+ */
+export interface BillingReadiness {
+  ready: boolean;
+  missing: ('billing_address' | 'billing_country' | 'company_legal_name' | 'tax_id')[];
+  billing: {
+    email: string | null;
+    address: string | null;
+    city: string | null;
+    state: string | null;
+    postalCode: string | null;
+    country: string | null;
+  };
+  company: {
+    legalName: string | null;
+    taxId: string | null;
+  };
+}
+
+/**
+ * Check if tenant has complete billing information for paid subscription
+ * Required before upgrading from Core to any paid plan
+ */
+export async function checkBillingReadiness(tenantId: string): Promise<BillingReadiness> {
+  const tenant = await getTenantById(tenantId);
+
+  if (!tenant) {
+    return {
+      ready: false,
+      missing: ['billing_address', 'billing_country', 'company_legal_name', 'tax_id'],
+      billing: {
+        email: null,
+        address: null,
+        city: null,
+        state: null,
+        postalCode: null,
+        country: null,
+      },
+      company: {
+        legalName: null,
+        taxId: null,
+      },
+    };
+  }
+
+  const missing: BillingReadiness['missing'] = [];
+
+  // Check billing address (address + country required)
+  if (!tenant.billingAddress || !tenant.billingAddress.trim()) {
+    missing.push('billing_address');
+  }
+  if (!tenant.billingCountry || !tenant.billingCountry.trim()) {
+    missing.push('billing_country');
+  }
+
+  // Check company tax info
+  if (!tenant.companyLegalName || !tenant.companyLegalName.trim()) {
+    missing.push('company_legal_name');
+  }
+  if (!tenant.taxId || !tenant.taxId.trim()) {
+    missing.push('tax_id');
+  }
+
+  return {
+    ready: missing.length === 0,
+    missing,
+    billing: {
+      email: tenant.billingEmail || null,
+      address: tenant.billingAddress || null,
+      city: tenant.billingCity || null,
+      state: tenant.billingState || null,
+      postalCode: tenant.billingPostalCode || null,
+      country: tenant.billingCountry || null,
+    },
+    company: {
+      legalName: tenant.companyLegalName || null,
+      taxId: tenant.taxId || null,
+    },
+  };
+}
+
+/**
+ * Update tenant billing information
+ */
+export async function updateTenantBilling(
+  tenantId: string,
+  updates: {
+    billingEmail?: string;
+    billingAddress?: string;
+    billingCity?: string;
+    billingState?: string;
+    billingPostalCode?: string;
+    billingCountry?: string;
+    companyLegalName?: string;
+    taxId?: string;
+  }
+): Promise<Tenant | null> {
+  const db = getDb();
+
+  const [updated] = await db
+    .update(tenants)
+    .set({
+      ...updates,
+      updatedAt: new Date(),
+    })
+    .where(eq(tenants.id, tenantId))
+    .returning();
+
+  return updated || null;
+}
+
 export const tenantService = {
   isValidSlug,
   isBlockedSlug,
@@ -473,4 +585,6 @@ export const tenantService = {
   getTenantMembershipWithRole,
   hasUserUsedTrial,
   userHasCorePlanTenant,
+  checkBillingReadiness,
+  updateTenantBilling,
 };

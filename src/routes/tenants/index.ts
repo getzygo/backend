@@ -40,6 +40,8 @@ import {
   updateTenantSecurityConfig,
   isTenantMember,
   getTenantMembership,
+  checkBillingReadiness,
+  updateTenantBilling,
 } from '../../services/tenant.service';
 import { checkVerificationStatus } from '../../services/verification.service';
 import { hasPermission } from '../../services/permission.service';
@@ -571,6 +573,175 @@ app.patch(
       sso_enabled: updatedConfig.ssoEnabled,
       sso_provider: updatedConfig.ssoProvider,
       updated_at: updatedConfig.updatedAt,
+    });
+  }
+);
+
+/**
+ * GET /api/v1/tenants/:tenantId/billing
+ * Get tenant billing readiness status
+ * Required for paid subscription upgrade
+ */
+app.get('/:tenantId/billing', async (c) => {
+  const user = c.get('user') as User;
+  const tenantId = c.req.param('tenantId');
+
+  // Verify membership
+  const isMember = await isTenantMember(user.id, tenantId);
+
+  if (!isMember) {
+    return c.json(
+      {
+        error: 'not_a_member',
+        message: 'You are not a member of this workspace',
+      },
+      403
+    );
+  }
+
+  // Check permission (billing management)
+  const canManage = await hasPermission(user.id, tenantId, 'canManageBilling');
+
+  if (!canManage) {
+    return c.json(
+      {
+        error: 'permission_denied',
+        message: 'You do not have permission to view billing information',
+      },
+      403
+    );
+  }
+
+  const billingStatus = await checkBillingReadiness(tenantId);
+
+  return c.json({
+    ready: billingStatus.ready,
+    missing: billingStatus.missing,
+    billing: {
+      email: billingStatus.billing.email,
+      address: billingStatus.billing.address,
+      city: billingStatus.billing.city,
+      state: billingStatus.billing.state,
+      postal_code: billingStatus.billing.postalCode,
+      country: billingStatus.billing.country,
+    },
+    company: {
+      legal_name: billingStatus.company.legalName,
+      tax_id: billingStatus.company.taxId,
+    },
+  });
+});
+
+// Update billing info schema
+const updateBillingSchema = z.object({
+  billing_email: z.string().email().optional(),
+  billing_address: z.string().min(5).max(255).optional(),
+  billing_city: z.string().min(1).max(100).optional(),
+  billing_state: z.string().max(100).optional(),
+  billing_postal_code: z.string().max(20).optional(),
+  billing_country: z.string().length(2).optional(), // ISO 3166-1 alpha-2
+  company_legal_name: z.string().min(2).max(200).optional(),
+  tax_id: z.string().min(5).max(50).optional(),
+});
+
+/**
+ * PATCH /api/v1/tenants/:tenantId/billing
+ * Update tenant billing information
+ * Required before upgrading to paid subscription
+ */
+app.patch(
+  '/:tenantId/billing',
+  zValidator('json', updateBillingSchema),
+  async (c) => {
+    const user = c.get('user') as User;
+    const tenantId = c.req.param('tenantId');
+    const updates = c.req.valid('json');
+    const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+    const userAgent = c.req.header('user-agent');
+
+    const db = getDb();
+
+    // Verify membership
+    const isMember = await isTenantMember(user.id, tenantId);
+
+    if (!isMember) {
+      return c.json(
+        {
+          error: 'not_a_member',
+          message: 'You are not a member of this workspace',
+        },
+        403
+      );
+    }
+
+    // Check permission
+    const canManage = await hasPermission(user.id, tenantId, 'canManageBilling');
+
+    if (!canManage) {
+      return c.json(
+        {
+          error: 'permission_denied',
+          message: 'You do not have permission to manage billing information',
+        },
+        403
+      );
+    }
+
+    // Convert snake_case to camelCase
+    const billingUpdates: Parameters<typeof updateTenantBilling>[1] = {};
+    if (updates.billing_email !== undefined) billingUpdates.billingEmail = updates.billing_email;
+    if (updates.billing_address !== undefined) billingUpdates.billingAddress = updates.billing_address;
+    if (updates.billing_city !== undefined) billingUpdates.billingCity = updates.billing_city;
+    if (updates.billing_state !== undefined) billingUpdates.billingState = updates.billing_state;
+    if (updates.billing_postal_code !== undefined) billingUpdates.billingPostalCode = updates.billing_postal_code;
+    if (updates.billing_country !== undefined) billingUpdates.billingCountry = updates.billing_country;
+    if (updates.company_legal_name !== undefined) billingUpdates.companyLegalName = updates.company_legal_name;
+    if (updates.tax_id !== undefined) billingUpdates.taxId = updates.tax_id;
+
+    const updated = await updateTenantBilling(tenantId, billingUpdates);
+
+    if (!updated) {
+      return c.json(
+        {
+          error: 'update_failed',
+          message: 'Failed to update billing information',
+        },
+        500
+      );
+    }
+
+    // Audit log
+    await db.insert(auditLogs).values({
+      userId: user.id,
+      action: 'billing_info_updated',
+      resourceType: 'tenant',
+      resourceId: tenantId,
+      details: {
+        fields_updated: Object.keys(updates),
+      },
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+      status: 'success',
+    });
+
+    // Return updated billing readiness
+    const billingStatus = await checkBillingReadiness(tenantId);
+
+    return c.json({
+      ready: billingStatus.ready,
+      missing: billingStatus.missing,
+      billing: {
+        email: billingStatus.billing.email,
+        address: billingStatus.billing.address,
+        city: billingStatus.billing.city,
+        state: billingStatus.billing.state,
+        postal_code: billingStatus.billing.postalCode,
+        country: billingStatus.billing.country,
+      },
+      company: {
+        legal_name: billingStatus.company.legalName,
+        tax_id: billingStatus.company.taxId,
+      },
     });
   }
 );

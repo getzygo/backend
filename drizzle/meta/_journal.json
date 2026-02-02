@@ -15,6 +15,13 @@
       "when": 1770023180966,
       "tag": "0001_optimal_luminals",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1770025018434,
+      "tag": "0002_right_miracleman",
+      "breakpoints": true
     }
   ]
 }
