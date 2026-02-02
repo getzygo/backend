@@ -51,17 +51,17 @@ const verifyCodeSchema = z.object({
   code: z.string().length(6, 'Code must be 6 digits'),
 });
 
-// Reset password schema
+// Reset password schema - must match signup password requirements
 const resetPasswordSchema = z.object({
   email: z.string().email('Invalid email address'),
   reset_token: z.string().min(1, 'Reset token is required'),
   password: z
     .string()
-    .min(8, 'Password must be at least 8 characters')
-    .regex(
-      /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/,
-      'Password must contain at least one lowercase letter, one uppercase letter, and one number'
-    ),
+    .min(12, 'Password must be at least 12 characters')
+    .regex(/[A-Z]/, 'Must contain at least one uppercase letter')
+    .regex(/[a-z]/, 'Must contain at least one lowercase letter')
+    .regex(/[0-9]/, 'Must contain at least one number')
+    .regex(/[^A-Za-z0-9]/, 'Must contain at least one special character'),
 });
 
 /**

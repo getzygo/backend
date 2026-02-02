@@ -1,6 +1,6 @@
 # Zygo Unified Authentication & RBAC Strategy
 
-**Version:** 2.0.0
+**Version:** 2.1.0
 **Last Updated:** February 2, 2026
 **Status:** Production Implementation
 **Related Docs:** [AUTHENTICATION.md](./AUTHENTICATION.md), [rbac_contract.md](./rbac_contract.md), [TENANCY.md](./TENANCY.md)
@@ -24,8 +24,11 @@
 13. [Account Linking Strategy](#13-account-linking-strategy)
 14. [Session Management](#14-session-management)
 15. [Admin Panel Authentication](#15-admin-panel-authentication)
-16. [API Endpoints Reference](#16-api-endpoints-reference)
-17. [Implementation Checklist](#17-implementation-checklist)
+16. [Redis Key Prefixes & TTLs](#16-redis-key-prefixes--ttls)
+17. [Security Implementation Details](#17-security-implementation-details)
+18. [API Endpoints Reference](#18-api-endpoints-reference)
+19. [Known Issues & TODOs](#19-known-issues--todos)
+20. [Implementation Checklist](#20-implementation-checklist)
 
 ---
 
@@ -201,9 +204,38 @@ async function verifyAuthToken(token: string): Promise<AuthTokenPayload | null>
 |----------|---------------|
 | **Unpredictable** | 32 bytes of cryptographically random data (base64url encoded) |
 | **Short-lived** | 2 minute TTL in Redis |
-| **Single-use** | Token is deleted atomically during verification |
+| **Single-use** | Token is deleted atomically during verification (Redis MULTI/EXEC) |
 | **Server-validated** | Token must exist in Redis; no client-side validation |
 | **Contains no secrets** | Token is opaque; all data stored server-side |
+| **Age double-check** | Payload includes `createdAt`, verified even if Redis TTL passes |
+
+### 3.5 Atomic Token Verification
+
+```typescript
+// src/services/auth-token.service.ts
+// Token verification uses atomic GET + DELETE to prevent replay attacks
+
+export async function verifyAuthToken(token: string): Promise<AuthTokenPayload | null> {
+  const redis = getRedis();
+  const key = `${REDIS_KEYS.AUTH_TOKEN}${token}`;
+
+  // Get and delete atomically using a transaction
+  const multi = redis.multi();
+  multi.get(key);
+  multi.del(key);  // Delete BEFORE returning to caller
+  const results = await multi.exec();
+
+  // ... parse and return payload
+
+  // Double-check expiration (defense in depth)
+  const age = Date.now() - payload.createdAt;
+  if (age > REDIS_TTL.AUTH_TOKEN * 1000) {
+    return null;
+  }
+
+  return payload;
+}
+```
 
 ---
 
@@ -664,7 +696,41 @@ const passwordSchema = z.string()
 | **Phone (SMS)** | 3 days | After deadline, redirect to /complete-profile |
 | **MFA (TOTP)** | 7 days | After deadline, redirect to /complete-profile |
 
-### 8.2 Verification Status Check
+### 8.2 Verification Prerequisites
+
+**IMPORTANT:** Verifications must be completed in order:
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│  VERIFICATION PREREQUISITES                                           │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  1. EMAIL VERIFICATION (no prerequisites)                            │
+│     └── Must complete first before any other verification            │
+│                                                                       │
+│  2. PHONE VERIFICATION (requires: email verified)                    │
+│     └── Middleware: requireEmailVerified                             │
+│     └── Endpoints: /verify-phone/send-code, /verify-phone            │
+│                                                                       │
+│  3. MFA SETUP (requires: email verified)                             │
+│     └── Middleware: requireEmailVerified                             │
+│     └── Endpoints: /mfa/setup, /mfa/enable, /mfa/verify              │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+```typescript
+// Middleware enforces prerequisite
+app.post('/send-code', authMiddleware, requireEmailVerified, async (c) => {
+  // Phone verification only accessible if email is verified
+});
+
+app.post('/setup', authMiddleware, requireEmailVerified, async (c) => {
+  // MFA setup only accessible if email is verified
+});
+```
+
+### 8.3 Verification Status Check
 
 ```typescript
 async function checkVerificationStatus(user: User, tenantId: string): Promise<VerificationStatus> {
@@ -705,7 +771,7 @@ async function checkVerificationStatus(user: User, tenantId: string): Promise<Ve
 }
 ```
 
-### 8.3 Phone Verification (Twilio SMS)
+### 8.4 Phone Verification (Twilio SMS)
 
 ```
 POST /api/v1/auth/verify-phone/send-code
@@ -728,7 +794,7 @@ POST /api/v1/auth/verify-phone
 - Audit log
 ```
 
-### 8.4 MFA Setup (TOTP)
+### 8.5 MFA Setup (TOTP)
 
 ```
 POST /api/v1/auth/mfa/setup
@@ -1162,7 +1228,115 @@ await supabase.auth.setSession({
 
 ---
 
-## 16. API Endpoints Reference
+## 16. Redis Key Prefixes & TTLs
+
+### 16.1 Key Prefixes
+
+All Redis keys use consistent prefixes for organization and debugging:
+
+| Key Prefix | Purpose | Example |
+|------------|---------|---------|
+| `auth_token:` | Cross-domain auth tokens | `auth_token:a8Kx9mN2...` |
+| `oauth:pending:` | OAuth pending signup data | `oauth:pending:abc123` |
+| `pwreset:code:` | Password reset 6-digit codes | `pwreset:code:user@email.com` |
+| `pwreset:token:` | Password reset tokens | `pwreset:token:user@email.com` |
+| `email_code:` | Email verification codes | `email_code:user@email.com` |
+| `phone_code:` | Phone verification SMS codes | `phone_code:+1234567890` |
+| `mfa_setup:` | Temporary MFA secret during setup | `mfa_setup:user-uuid` |
+| `rbac:` | Permission cache | `rbac:user-uuid:tenant-uuid` |
+| `ratelimit:` | Rate limiting counters | `ratelimit:pwreset:user@email.com` |
+| `session:` | User sessions | `session:session-id` |
+| `tenant_config:` | Tenant configuration cache | `tenant_config:tenant-uuid` |
+
+### 16.2 TTL Values
+
+| Data Type | TTL | Notes |
+|-----------|-----|-------|
+| Auth Token | 2 minutes | Cross-domain redirect tokens |
+| OAuth Pending | 30 minutes | Pending OAuth signup data |
+| Password Reset Code | 1 hour | 6-digit email code |
+| Password Reset Token | 15 minutes | After code verification |
+| Email Verification Code | 15 minutes | 6-digit email code |
+| Phone Verification Code | 10 minutes | 6-digit SMS code |
+| MFA Setup Secret | 10 minutes | Temporary during setup |
+| RBAC Permission Cache | 5 minutes | Immediate invalidation on changes |
+| Session | 7 days | User session data |
+| Rate Limit Window | 15 minutes | Default rate limit window |
+
+---
+
+## 17. Security Implementation Details
+
+### 17.1 Audit Logging
+
+All authentication actions are logged with IP address and user agent:
+
+```typescript
+// Every auth endpoint logs IP and user agent
+const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+const userAgent = c.req.header('user-agent');
+
+await db.insert(auditLogs).values({
+  userId: user.id,
+  action: 'login',  // or: 'signup', 'password_reset', 'mfa_enabled', etc.
+  resourceType: 'user',
+  resourceId: user.id,
+  details: { tenant_slug, role_slug, ... },
+  ipAddress: ipAddress || undefined,
+  userAgent: userAgent || undefined,
+  status: 'success',  // or 'failure'
+});
+```
+
+### 17.2 Audit Actions Logged
+
+| Action | When |
+|--------|------|
+| `login` | Successful signin |
+| `account_locked` | Too many failed attempts |
+| `password_reset_requested` | Forgot password initiated |
+| `password_reset_code_verified` | Reset code validated |
+| `password_reset_code_blocked` | Too many code attempts |
+| `password_reset_completed` | Password successfully changed |
+| `email_verified` | Email verification completed |
+| `phone_verified` | Phone verification completed |
+| `mfa_enabled` | MFA setup completed |
+| `mfa_disabled` | MFA turned off |
+| `mfa_backup_codes_regenerated` | New backup codes generated |
+| `tenant_switch` | User switched to different tenant |
+| `token_verified` | Cross-domain token consumed |
+| `oauth_account_linked` | OAuth provider linked |
+| `oauth_account_unlinked` | OAuth provider removed |
+
+### 17.3 Rate Limiting
+
+| Endpoint | Limit | Window |
+|----------|-------|--------|
+| Password reset request | 3 requests | 1 hour |
+| Email verification resend | 1 active code | Until expiry |
+| Phone verification resend | 1 active code | Until expiry |
+| Reset code verification | 5 attempts | Until code expires |
+
+### 17.4 Email Enumeration Prevention
+
+Password reset always returns success to prevent email enumeration:
+
+```typescript
+// Always return same response regardless of user existence
+const successResponse = {
+  success: true,
+  message: 'If an account exists with this email, a password reset code has been sent.',
+};
+
+const user = await getUserByEmail(email);
+if (!user) {
+  return c.json(successResponse);  // Same response as success
+}
+```
+
+---
+
+## 18. API Endpoints Reference
 
 ### Authentication
 
@@ -1181,11 +1355,11 @@ POST /api/v1/auth/signin/switch-tenant      # Switch to different tenant
 POST /api/v1/auth/signin/signout            # Sign out
 
 # OAuth
-POST /api/v1/auth/oauth/callback            # Exchange OAuth code
-POST /api/v1/auth/oauth/signin              # OAuth signin
+POST /api/v1/auth/oauth/callback            # Exchange OAuth code (authorization code flow)
+POST /api/v1/auth/oauth/signin              # OAuth signin (supports both flows)
 POST /api/v1/auth/oauth/complete-signup     # Complete OAuth signup
-POST /api/v1/auth/oauth/link/initiate       # Start account linking
-POST /api/v1/auth/oauth/link/verify         # Complete account linking
+POST /api/v1/auth/oauth/link/initiate       # Start account linking (sends verification email)
+POST /api/v1/auth/oauth/link/verify         # Complete account linking (verify code)
 GET  /api/v1/auth/oauth/providers           # List linked providers
 DELETE /api/v1/auth/oauth/providers/:p      # Unlink provider
 
@@ -1194,65 +1368,125 @@ POST /api/v1/auth/verify-token              # Verify auth token (cross-domain)
 
 # Password Reset
 POST /api/v1/auth/forgot-password           # Request reset code
-POST /api/v1/auth/verify-reset-code         # Verify code, get token
-POST /api/v1/auth/reset-password            # Reset password
-GET  /api/v1/auth/reset-status              # Check reset status
+POST /api/v1/auth/verify-reset-code         # Verify code, get reset token
+POST /api/v1/auth/reset-password            # Reset password with token
+GET  /api/v1/auth/reset-status?email=...    # Check reset code/token status
 
-# Email Verification
-POST /api/v1/auth/verify-email              # Verify email code
-POST /api/v1/auth/verify-email/resend       # Resend verification
-GET  /api/v1/auth/verify-email/status       # Check verification status
+# Email Verification (authenticated)
+POST /api/v1/auth/verify-email              # Verify email code (requires auth)
+POST /api/v1/auth/verify-email/resend       # Resend verification (requires auth)
+GET  /api/v1/auth/verify-email/status       # Check verification status (requires auth)
 
-# Phone Verification
+# Email Verification (public - no auth required)
+POST /api/v1/auth/verify-email/public       # Verify email with email + code
+POST /api/v1/auth/verify-email/resend-public # Resend verification with email
+
+# Phone Verification (requires email verified)
 POST /api/v1/auth/verify-phone/send-code    # Send SMS code
 POST /api/v1/auth/verify-phone              # Verify phone code
 GET  /api/v1/auth/verify-phone/status       # Check phone status
 
-# MFA
-POST /api/v1/auth/mfa/setup                 # Start MFA setup
-POST /api/v1/auth/mfa/enable                # Enable MFA
-POST /api/v1/auth/mfa/verify                # Verify MFA code
-POST /api/v1/auth/mfa/disable               # Disable MFA
+# MFA (requires email verified)
+POST /api/v1/auth/mfa/setup                 # Start MFA setup (returns secret + QR)
+POST /api/v1/auth/mfa/enable                # Enable MFA (verify first code)
+POST /api/v1/auth/mfa/verify                # Verify MFA code (for sensitive ops)
+POST /api/v1/auth/mfa/disable               # Disable MFA (requires current code)
 POST /api/v1/auth/mfa/backup-codes          # Regenerate backup codes
-GET  /api/v1/auth/mfa/status                # Get MFA status
+GET  /api/v1/auth/mfa/status                # Get MFA status (enabled: true/false)
 ```
+
+### Endpoint Authentication Requirements
+
+| Endpoint | Auth Required | Additional Requirements |
+|----------|---------------|------------------------|
+| `/signup/*` | No | - |
+| `/signin` | No | - |
+| `/signin/switch-tenant` | Yes (Supabase token) | - |
+| `/signin/signout` | No (best-effort) | - |
+| `/oauth/*` | Varies | OAuth token for some |
+| `/verify-token` | No | Token IS the auth |
+| `/forgot-password` | No | Rate limited |
+| `/verify-reset-code` | No | Rate limited |
+| `/reset-password` | No | Valid reset token |
+| `/reset-status` | No | - |
+| `/verify-email` | Yes | - |
+| `/verify-email/public` | No | Email + code |
+| `/verify-email/resend` | Yes | - |
+| `/verify-email/resend-public` | No | Email only |
+| `/verify-email/status` | Yes | - |
+| `/verify-phone/*` | Yes | Email must be verified |
+| `/mfa/*` | Yes | Email must be verified |
 
 ---
 
-## 17. Implementation Checklist
+## 19. Known Issues & TODOs
+
+### 19.1 Open Issues
+
+| Issue | File | Description |
+|-------|------|-------------|
+| **OAuth linking email not sent** | `oauth.routes.ts:416, 596` | TODO comments indicate email sending not implemented |
+
+### 19.2 Code TODOs
+
+```typescript
+// oauth.routes.ts:416
+// TODO: Send email with verification code
+// For now, generate a temporary code and store it
+
+// oauth.routes.ts:596
+// TODO: Send email with verification code
+```
+
+### 19.3 Recently Fixed
+
+| Issue | Fix Date | Description |
+|-------|----------|-------------|
+| Password validation mismatch | 2026-02-02 | Reset now requires 12 chars + special char (matches signup) |
+
+---
+
+## 20. Implementation Checklist
 
 ### Phase 1: Core Auth ✅
 - [x] Signup with Owner role creation
-- [x] Email verification
+- [x] Email verification (authenticated + public endpoints)
 - [x] Signin with verification check
 - [x] Complete profile page
-- [x] Phone verification (Twilio)
-- [x] MFA setup (TOTP)
-- [x] Password reset (3-step)
+- [x] Phone verification (Twilio SMS)
+- [x] MFA setup (TOTP with backup codes)
+- [x] Password reset (3-step flow)
+- [x] Rate limiting
+- [x] Account lockout (5 attempts → 15 min)
+- [x] Audit logging with IP/user-agent
 
 ### Phase 2: Cross-Domain Auth ✅
-- [x] Auth token service (Redis)
+- [x] Auth token service (Redis, 2 min TTL)
+- [x] Atomic token verification (MULTI/EXEC)
 - [x] verify-token endpoint
 - [x] Frontend token verification
 - [x] Supabase token passthrough
+- [x] Tenant memberships caching in token
 
 ### Phase 3: Multi-Tenant ✅
-- [x] Tenant memberships caching
-- [x] Tenant switching
-- [x] Browser state cleanup
+- [x] Tenant memberships caching at login
+- [x] Tenant switching with fresh memberships
+- [x] Browser state cleanup on switch
 - [x] Tenant isolation enforcement
+- [x] No cross-tenant API calls
 
 ### Phase 4: OAuth ✅
-- [x] Google OAuth
-- [x] GitHub OAuth
-- [x] Account linking with verification
+- [x] Google OAuth (authorization code + implicit)
+- [x] GitHub OAuth (authorization code + implicit)
+- [x] Account linking with email verification
 - [x] Auto-link for users without tenants
+- [ ] **TODO:** OAuth linking email sending (see Section 19)
 
 ### Phase 5: RBAC ✅
-- [x] Permission resolution with Redis cache
+- [x] Permission resolution with Redis cache (5 min TTL)
 - [x] Immediate cache invalidation
 - [x] Custom role CRUD
-- [x] Owner role protection
+- [x] Owner role protection (is_protected = true)
 - [x] Role assignment with hierarchy check
 
 ### Phase 6: Enterprise (In Progress)
@@ -1262,6 +1496,10 @@ GET  /api/v1/auth/mfa/status                # Get MFA status
 - [ ] Domain claiming
 - [ ] Admin panel (email + MFA only)
 
+### Phase 7: Bug Fixes
+- [x] Fix password reset validation (min 8 → 12 chars) ✅ Fixed 2026-02-02
+- [ ] Implement OAuth linking email sending
+
 ---
 
-*Version: 2.0.0 | February 2, 2026*
+*Version: 2.1.0 | February 2, 2026*
