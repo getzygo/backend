@@ -8,6 +8,7 @@ import { Hono } from 'hono';
 import authRoutes from './auth';
 import rolesRoutes from './roles';
 import tenantsRoutes from './tenants';
+import usersRoutes from './users.routes';
 import adminAuthRoutes from './admin/auth.routes';
 
 const app = new Hono();
@@ -24,6 +25,7 @@ app.get('/health', (c) => {
 app.route('/auth', authRoutes);
 app.route('/roles', rolesRoutes);
 app.route('/tenants', tenantsRoutes);
+app.route('/users', usersRoutes);
 
 // Admin panel routes (Phase 5)
 // POST /api/v1/admin/auth/signin - Admin signin
