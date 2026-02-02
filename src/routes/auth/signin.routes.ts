@@ -252,11 +252,9 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
       redirect_url: '/onboarding',
       message: 'Please create your first workspace',
     });
-  } else if (userTenants.length === 1) {
-    // Auto-select single tenant
-    targetTenant = userTenants[0].tenant;
-    verificationStatus = await checkVerificationStatus(user, targetTenant.id);
   }
+  // Note: We no longer auto-select single tenant - always show workspace picker
+  // This gives users better control and prevents confusion after logout
 
   // Audit log
   await db.insert(auditLogs).values({

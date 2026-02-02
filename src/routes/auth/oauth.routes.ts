@@ -256,57 +256,21 @@ app.post('/signin', async (c) => {
       const supabaseMeta = supabaseUser.user_metadata || {};
       const avatarUrl = user.avatarUrl || supabaseMeta.avatar_url || supabaseMeta.picture;
 
-      // Determine redirect
-      if (userTenants.length === 1) {
-        const tenantMembership = userTenants[0];
-        const tenant = tenantMembership.tenant;
-        const role = tenantMembership.role;
-        const verificationStatus = await checkVerificationStatus(user, tenant.id);
-
-        response.current_tenant = {
-          id: tenant.id,
-          name: tenant.name,
-          slug: tenant.slug,
-          type: tenant.type,
-          plan: tenant.plan,
-        };
-
-        if (verificationStatus.complete) {
-          // Generate secure opaque auth token stored in Redis
-          const authToken = await createAuthToken({
-            userId: user.id,
-            tenantId: tenant.id,
-            email: user.email,
-            firstName: user.firstName,
-            lastName: user.lastName,
-            avatarUrl: avatarUrl,
-            emailVerified: user.emailVerified,
-            emailVerifiedVia: user.emailVerifiedVia || provider,
-            roleId: role.id,
-            roleName: role.name,
-            roleSlug: role.slug,
-            isOwner: tenantMembership.isOwner,
-          });
-          response.redirect_url = `https://${tenant.slug}.zygo.tech?auth_token=${authToken}`;
-        } else {
-          response.redirect_url = '/complete-profile';
-        }
-      } else {
-        // Multiple tenants - show picker
-        response.tenants = userTenants.map((m) => ({
-          id: m.tenant.id,
-          name: m.tenant.name,
-          slug: m.tenant.slug,
-          type: m.tenant.type,
-          plan: m.tenant.plan,
-          role: {
-            id: m.role.id,
-            name: m.role.name,
-          },
-          is_owner: m.isOwner,
-        }));
-        response.redirect_url = '/select-workspace';
-      }
+      // Always show workspace picker - don't auto-select even for single tenant
+      // This gives users better control and prevents confusion after logout
+      response.tenants = userTenants.map((m) => ({
+        id: m.tenant.id,
+        name: m.tenant.name,
+        slug: m.tenant.slug,
+        type: m.tenant.type,
+        plan: m.tenant.plan,
+        role: {
+          id: m.role.id,
+          name: m.role.name,
+        },
+        is_owner: m.isOwner,
+      }));
+      response.redirect_url = '/select-workspace';
 
       return c.json(response);
     }
@@ -477,29 +441,9 @@ app.post('/signin', async (c) => {
     // Determine redirect and tenant context
     if (userTenants.length === 0) {
       response.redirect_url = '/create-workspace';
-    } else if (userTenants.length === 1) {
-      const tenant = userTenants[0].tenant;
-      const verificationStatus = await checkVerificationStatus(user, tenant.id);
-
-      response.current_tenant = {
-        id: tenant.id,
-        name: tenant.name,
-        slug: tenant.slug,
-        type: tenant.type,
-        plan: tenant.plan,
-      };
-
-      response.verification_status = {
-        complete: verificationStatus.complete,
-        missing: verificationStatus.missing,
-        deadlines: verificationStatus.deadlines,
-      };
-
-      response.redirect_url = verificationStatus.complete
-        ? `https://${tenant.slug}.zygo.tech`
-        : '/complete-profile';
     } else {
-      // Multiple tenants - show picker
+      // Always show workspace picker - don't auto-select even for single tenant
+      // This gives users better control and prevents confusion after logout
       response.tenants = userTenants.map((m) => ({
         id: m.tenant.id,
         name: m.tenant.name,
