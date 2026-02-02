@@ -28,6 +28,7 @@ import {
 } from '../db/schema';
 import { hashPassword, getUserByEmail } from './user.service';
 import { sendVerificationEmail } from './email.service';
+import { createAuthUser } from './supabase.service';
 import { cachePermissions } from './permission.service';
 import { isValidSlug, isBlockedSlug } from '../utils/slug-validation';
 
@@ -234,19 +235,37 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
     throw new Error('This workspace URL is already taken');
   }
 
-  // Hash password
+  // Hash password for our records
   const passwordHash = await hashPassword(password);
 
   const now = new Date();
   const trialExpiresAt = new Date();
   trialExpiresAt.setDate(trialExpiresAt.getDate() + TRIAL_PERIOD_DAYS);
 
+  // 1. Create user in Supabase Auth FIRST (before transaction)
+  // This allows login via Supabase's auth system
+  const authResult = await createAuthUser(normalizedEmail, password, {
+    first_name: firstName,
+    last_name: lastName,
+  });
+
+  if (authResult.error) {
+    throw new Error(`Failed to create account: ${authResult.error}`);
+  }
+
+  if (!authResult.user) {
+    throw new Error('Failed to create account: No user returned from auth service');
+  }
+
+  const supabaseUserId = authResult.user.id;
+
   // Create everything in a transaction
   const result = await db.transaction(async (tx) => {
-    // 1. Create user with all details from Step 2
+    // 2. Create user in public.users with the SAME ID as Supabase auth
     const [user] = await tx
       .insert(users)
       .values({
+        id: supabaseUserId, // Use Supabase auth user ID
         email: normalizedEmail,
         emailVerified: false,
         passwordHash,
@@ -267,7 +286,7 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
       })
       .returning();
 
-    // 2. Create tenant with all details from Steps 1, 3, 4
+    // 3. Create tenant with all details from Steps 1, 3, 4
     const [tenant] = await tx
       .insert(tenants)
       .values({
