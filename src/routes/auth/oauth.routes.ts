@@ -949,9 +949,9 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         isOwner: tenantResult.membership.isOwner,
       });
 
-      // For existing users creating a new tenant, check if they need to complete verification
-      // Phone and MFA are still required for all users
-      const needsVerification = !existingUser.phoneVerified || !existingUser.mfaEnabled;
+      // Check verification status - users can access dashboard during grace period
+      const verificationStatus = await checkVerificationStatus(existingUser, tenantResult.tenant.id);
+      const dashboardUrl = `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`;
 
       return c.json(
         {
@@ -966,10 +966,13 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
           tenant: tenantResult.tenant,
           role: tenantResult.ownerRole,
           auth_token: authToken,
-          redirect_url: needsVerification
-            ? '/complete-profile'
-            : `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`,
-          dashboard_url: `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`,
+          redirect_url: verificationStatus.complete ? dashboardUrl : '/complete-profile',
+          dashboard_url: dashboardUrl,
+          verification_status: {
+            complete: verificationStatus.complete,
+            missing: verificationStatus.missing,
+            deadlines: verificationStatus.deadlines,
+          },
         },
         201
       );
@@ -1034,8 +1037,15 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       isOwner: true, // New signup = owner
     });
 
-    // After signup, redirect to complete-profile for phone verification and MFA setup
-    // The auth token is included so the complete-profile page can authenticate API calls
+    // Check if user needs to complete profile verification
+    // Users can access dashboard during grace period for phone (3 days) and MFA (7 days)
+    const verificationStatus = await checkVerificationStatus(result.user, result.tenant.id);
+    const dashboardUrl = `https://${result.tenant.slug}.zygo.tech?auth_token=${authToken}`;
+
+    // Only redirect to complete-profile if verification is actually required now
+    // (profile incomplete, email unverified, or deadline passed)
+    const redirectUrl = verificationStatus.complete ? dashboardUrl : '/complete-profile';
+
     return c.json(
       {
         success: true,
@@ -1043,9 +1053,13 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         tenant: result.tenant,
         role: result.role,
         auth_token: authToken,
-        redirect_url: '/complete-profile',
-        // Include dashboard URL for after profile completion
-        dashboard_url: `https://${result.tenant.slug}.zygo.tech?auth_token=${authToken}`,
+        redirect_url: redirectUrl,
+        dashboard_url: dashboardUrl,
+        verification_status: {
+          complete: verificationStatus.complete,
+          missing: verificationStatus.missing,
+          deadlines: verificationStatus.deadlines,
+        },
       },
       201
     );
