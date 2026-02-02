@@ -455,6 +455,7 @@ export async function signupWithOAuth(params: {
   email: string;
   firstName?: string;
   lastName?: string;
+  avatarUrl?: string; // OAuth provider avatar URL
 
   // Step 1: Plan
   plan: PlanType;
@@ -488,6 +489,7 @@ export async function signupWithOAuth(params: {
     email,
     firstName,
     lastName,
+    avatarUrl,
     plan,
     billingCycle,
     licenseCount,
@@ -562,6 +564,8 @@ export async function signupWithOAuth(params: {
         firstName: firstName || null,
         lastName: lastName || null,
         displayName: firstName && lastName ? `${firstName} ${lastName}` : firstName || undefined,
+        avatarUrl: avatarUrl || null, // OAuth provider avatar
+        avatarSource: avatarUrl ? 'oauth' : null, // Track avatar source
         phone: phone || null,
         phoneCountryCode: phoneCountryCode || null,
         phoneVerified: false,

@@ -935,6 +935,9 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
     const workspaceName = body.workspace_name ||
       body.workspace_subdomain.split('-').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 
+    // Get avatar from OAuth provider
+    const avatarUrl = userMeta.avatar_url || userMeta.picture;
+
     // Create user and tenant using signupWithOAuth
     const result = await signupWithOAuth({
       provider,
@@ -942,6 +945,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       email: supabaseUser.email!,
       firstName: body.first_name || derivedFirstName,
       lastName: body.last_name || derivedLastName,
+      avatarUrl: avatarUrl, // Pass OAuth avatar URL
 
       plan: body.plan,
       billingCycle: body.billing_cycle,
@@ -964,9 +968,6 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       ipAddress: ipAddress || undefined,
       userAgent: userAgent || undefined,
     });
-
-    // Get avatar from OAuth provider
-    const avatarUrl = userMeta.avatar_url || userMeta.picture;
 
     // Generate secure opaque auth token stored in Redis
     const authToken = await createAuthToken({

@@ -29,19 +29,28 @@ export const users = pgTable(
     passwordHash: text('password_hash').notNull(),
 
     // Profile
+    title: varchar('title', { length: 20 }), // Mr, Ms, Mx, Dr, Prof
     firstName: varchar('first_name', { length: 100 }),
     lastName: varchar('last_name', { length: 100 }),
     displayName: varchar('display_name', { length: 200 }),
+    jobTitle: varchar('job_title', { length: 100 }),
+    reportingManagerId: uuid('reporting_manager_id').references(() => users.id, { onDelete: 'set null' }),
     avatarUrl: text('avatar_url'),
+    avatarSource: varchar('avatar_source', { length: 10 }), // 'upload' or 'oauth'
 
     // Phone
     phone: varchar('phone', { length: 20 }),
     phoneCountryCode: varchar('phone_country_code', { length: 5 }),
     phoneVerified: boolean('phone_verified').notNull().default(false),
 
-    // Location
+    // Location & Address
     country: varchar('country', { length: 2 }), // ISO 3166-1 alpha-2
+    state: varchar('state', { length: 100 }), // State/Province/Region
+    stateCode: varchar('state_code', { length: 10 }), // State ISO code
     city: varchar('city', { length: 100 }),
+    addressLine1: varchar('address_line_1', { length: 255 }), // Street address
+    addressLine2: varchar('address_line_2', { length: 255 }), // Apt, suite, etc.
+    postalCode: varchar('postal_code', { length: 20 }), // ZIP/Postal code
 
     // Status
     status: varchar('status', { length: 20 }).notNull().default('active'),
