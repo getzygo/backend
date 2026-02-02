@@ -246,9 +246,203 @@ app.get('/check-slug/:slug', async (c) => {
   });
 });
 
+// Schema for existing user creating new workspace
+const createWorkspaceSchema = z.object({
+  // Authentication
+  email: z.string().email('Invalid email address'),
+  password: z.string().min(1, 'Password is required'),
+
+  // Plan Selection
+  plan: planEnum,
+  billing_cycle: billingCycleEnum,
+  license_count: z.number().int().min(1).max(1000).optional(),
+
+  // Workspace Setup
+  workspace_name: z.string().min(2, 'Workspace name must be at least 2 characters').max(100),
+  workspace_subdomain: z
+    .string()
+    .min(3, 'Workspace URL must be at least 3 characters')
+    .max(50)
+    .regex(
+      /^[a-z0-9]([a-z0-9-]{0,48}[a-z0-9])?$/,
+      'Workspace URL can only contain lowercase letters, numbers, and hyphens'
+    ),
+  compliance_requirements: z.array(complianceEnum).optional().default([]),
+
+  // Company Details (optional)
+  company_name: z.string().min(2).max(200).optional(),
+  industry: industryEnum.optional(),
+  company_size: companySizeEnum.optional(),
+});
+
+/**
+ * POST /api/v1/auth/signup/create-workspace
+ * Create a new workspace for an existing user (requires password verification)
+ * Similar to OAuth flow but for email/password users
+ */
+app.post('/create-workspace', zValidator('json', createWorkspaceSchema), async (c) => {
+  const body = c.req.valid('json');
+  const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const userAgent = c.req.header('user-agent');
+
+  const normalizedEmail = body.email.toLowerCase().trim();
+  const normalizedSlug = body.workspace_subdomain.toLowerCase().trim();
+
+  try {
+    // Import services
+    const { signInWithPassword } = await import('../../services/supabase.service');
+    const { createTenant, isSlugAvailable, userHasCorePlanTenant, hasUserUsedTrial } = await import('../../services/tenant.service');
+    const { getUserByEmail } = await import('../../services/user.service');
+    const { checkVerificationStatus } = await import('../../services/verification.service');
+
+    // 1. Verify user exists
+    const user = await getUserByEmail(normalizedEmail);
+    if (!user) {
+      return c.json(
+        {
+          error: 'user_not_found',
+          message: 'No account found with this email. Please sign up first.',
+        },
+        404
+      );
+    }
+
+    // 2. Verify password with Supabase
+    const authResult = await signInWithPassword(normalizedEmail, body.password);
+    if (authResult.error || !authResult.session) {
+      return c.json(
+        {
+          error: 'invalid_credentials',
+          message: 'Invalid email or password',
+        },
+        401
+      );
+    }
+
+    // 3. Check if slug is available
+    const slugAvailable = await isSlugAvailable(normalizedSlug);
+    if (!slugAvailable) {
+      return c.json(
+        {
+          error: 'slug_unavailable',
+          message: 'This workspace URL is already taken',
+        },
+        409
+      );
+    }
+
+    // 4. Check Core plan limit (1 free workspace per user)
+    if (body.plan === 'core') {
+      const hasCore = await userHasCorePlanTenant(user.id);
+      if (hasCore) {
+        return c.json(
+          {
+            error: 'core_limit_reached',
+            message: 'You can only have one free (Core) workspace. Please select a paid plan.',
+          },
+          409
+        );
+      }
+    }
+
+    // 5. Create the new tenant
+    const tenantResult = await createTenant({
+      name: body.workspace_name,
+      slug: normalizedSlug,
+      type: body.plan === 'core' ? 'personal' : 'organization',
+      ownerUserId: user.id,
+      plan: body.plan,
+    });
+
+    if (!tenantResult) {
+      return c.json(
+        {
+          error: 'tenant_creation_failed',
+          message: 'Failed to create workspace',
+        },
+        500
+      );
+    }
+
+    // 6. Create auth token for redirect
+    const authToken = await createAuthToken({
+      userId: user.id,
+      tenantId: tenantResult.tenant.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      avatarUrl: user.avatarUrl || undefined,
+      emailVerified: user.emailVerified,
+      emailVerifiedVia: user.emailVerifiedVia || undefined,
+      roleId: tenantResult.ownerRole.id,
+      roleName: tenantResult.ownerRole.name,
+      roleSlug: tenantResult.ownerRole.slug,
+      isOwner: true,
+    });
+
+    // 7. Build redirect URL
+    const redirectUrl = `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`;
+
+    // 8. Check verification status for response
+    const verificationStatus = await checkVerificationStatus(user, tenantResult.tenant.id);
+
+    return c.json({
+      success: true,
+      user: {
+        id: user.id,
+        email: user.email,
+        first_name: user.firstName,
+        last_name: user.lastName,
+        email_verified: user.emailVerified,
+      },
+      tenant: {
+        id: tenantResult.tenant.id,
+        name: tenantResult.tenant.name,
+        slug: tenantResult.tenant.slug,
+        type: tenantResult.tenant.type,
+        plan: tenantResult.tenant.plan,
+        trial_expires_at: tenantResult.tenant.trialExpiresAt,
+        subscription_status: tenantResult.tenant.subscriptionStatus,
+      },
+      role: {
+        id: tenantResult.ownerRole.id,
+        name: tenantResult.ownerRole.name,
+      },
+      verification_status: {
+        complete: verificationStatus.complete,
+        missing: verificationStatus.missing,
+      },
+      redirect_url: redirectUrl,
+    }, 201);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to create workspace';
+
+    // Handle specific errors
+    if (message.includes('Core') || message.includes('free workspace')) {
+      return c.json(
+        {
+          error: 'core_limit_reached',
+          message,
+        },
+        409
+      );
+    }
+
+    console.error('Create workspace error:', error);
+    return c.json(
+      {
+        error: 'create_workspace_failed',
+        message,
+      },
+      400
+    );
+  }
+});
+
 /**
  * GET /api/v1/auth/signup/check-email/:email
  * Check if email is available for signup
+ * Returns user info if exists (for "create new workspace" flow)
  */
 app.get('/check-email/:email', async (c) => {
   const email = c.req.param('email').toLowerCase().trim();
@@ -267,12 +461,33 @@ app.get('/check-email/:email', async (c) => {
   const db = getDb();
   const existingUser = await db.query.users.findFirst({
     where: eq(users.email, email),
-    columns: { id: true },
+    columns: {
+      id: true,
+      firstName: true,
+      lastName: true,
+      hasUsedTrial: true,
+    },
   });
+
+  if (!existingUser) {
+    return c.json({
+      email,
+      available: true,
+      user_exists: false,
+    });
+  }
+
+  // User exists - check their workspace info for the "create new workspace" flow
+  const { userHasCorePlanTenant } = await import('../../services/tenant.service');
+  const hasCorePlan = await userHasCorePlanTenant(existingUser.id);
 
   return c.json({
     email,
-    available: !existingUser,
+    available: false,
+    user_exists: true,
+    can_create_workspace: true,
+    has_used_trial: existingUser.hasUsedTrial,
+    has_core_plan: hasCorePlan,
   });
 });
 
