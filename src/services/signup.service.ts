@@ -440,7 +440,7 @@ export async function signup(params: SignupParams): Promise<SignupResult> {
     },
     requiresEmailVerification: true,
     verificationEmailSent,
-    redirectUrl: '/verify-email',
+    redirectUrl: `https://${result.tenant.slug}.zygo.tech`,
   };
 }
 
