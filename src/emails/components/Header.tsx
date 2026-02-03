@@ -24,8 +24,8 @@ export function Header({ logoUrl = 'https://demo.zygo.tech/logo.png' }: HeaderPr
           <Img
             src={logoUrl}
             alt="Zygo"
-            width="120"
-            height="40"
+            width="48"
+            height="48"
             style={logoStyle}
           />
         </Column>
