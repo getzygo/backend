@@ -132,6 +132,8 @@ app.get('/me', authMiddleware, optionalTenantMiddleware, async (c) => {
     phone_country_code: user.phoneCountryCode,
     phone_verified: user.phoneVerified,
     mfa_enabled: user.mfaEnabled,
+    // Password status (for OAuth-only users who can't change password)
+    has_password: !!user.passwordHash,
     // Address fields
     address_line_1: user.addressLine1,
     address_line_2: user.addressLine2,
