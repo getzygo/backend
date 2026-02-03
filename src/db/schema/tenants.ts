@@ -66,6 +66,33 @@ export const tenants = pgTable(
     companyLegalName: varchar('company_legal_name', { length: 200 }),
     taxId: varchar('tax_id', { length: 50 }), // VAT ID, Tax ID, EIN, etc.
 
+    // Company Address (General Tab)
+    website: varchar('website', { length: 255 }),
+    phone: varchar('phone', { length: 30 }),
+    phoneCountryCode: varchar('phone_country_code', { length: 5 }),
+    addressLine1: varchar('address_line1', { length: 255 }),
+    addressLine2: varchar('address_line2', { length: 255 }),
+    city: varchar('city', { length: 100 }),
+    stateProvince: varchar('state_province', { length: 100 }),
+    postalCode: varchar('postal_code', { length: 20 }),
+    country: varchar('country', { length: 2 }), // ISO 3166-1 alpha-2
+
+    // Legal & Tax (Legal Tab)
+    businessType: varchar('business_type', { length: 30 }),
+    // 'sole_proprietor' | 'partnership' | 'llc' | 'corporation' | 's_corp' | 'nonprofit' | 'other'
+    incorporationDate: timestamp('incorporation_date', { withTimezone: true }),
+    countryOfIncorporation: varchar('country_of_incorporation', { length: 2 }),
+    registrationNumber: varchar('registration_number', { length: 50 }),
+    vatNumber: varchar('vat_number', { length: 30 }),
+    vatVerified: boolean('vat_verified').default(false),
+    taxIdVerified: boolean('tax_id_verified').default(false),
+
+    // Billing Address (Billing Tab) - additional fields
+    useDifferentBillingAddress: boolean('use_different_billing_address').default(false),
+    billingAddressLine2: varchar('billing_address_line2', { length: 255 }),
+    billingPhone: varchar('billing_phone', { length: 30 }),
+    billingPhoneCountryCode: varchar('billing_phone_country_code', { length: 5 }),
+
     // Branding
     logoUrl: text('logo_url'),
     primaryColor: varchar('primary_color', { length: 7 }).default('#6366f1'),
@@ -76,7 +103,14 @@ export const tenants = pgTable(
 
     // Status
     status: varchar('status', { length: 20 }).notNull().default('active'),
-    // 'active' | 'suspended' | 'deleted'
+    // 'active' | 'suspended' | 'pending_deletion' | 'deleted'
+
+    // Deletion tracking
+    deletionRequestedAt: timestamp('deletion_requested_at', { withTimezone: true }),
+    deletionScheduledAt: timestamp('deletion_scheduled_at', { withTimezone: true }),
+    deletionCancelableUntil: timestamp('deletion_cancelable_until', { withTimezone: true }),
+    deletedBy: uuid('deleted_by'),
+    deletionReason: text('deletion_reason'),
 
     // Metadata
     metadata: jsonb('metadata').default({}),
@@ -146,12 +180,89 @@ export const tenantSecurityConfig = pgTable(
   })
 );
 
+/**
+ * Tenant Contacts
+ * Contact information for different roles (primary, billing, technical, etc.)
+ */
+export const tenantContacts = pgTable(
+  'tenant_contacts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+    type: varchar('type', { length: 30 }).notNull(),
+    // 'primary' | 'technical-support' | 'financial' | 'marketing' | 'sales' | 'legal' | 'hr' | 'operations' | 'customer-success'
+    name: varchar('name', { length: 100 }).notNull(),
+    email: varchar('email', { length: 255 }).notNull(),
+    phone: varchar('phone', { length: 30 }),
+    phoneCountryCode: varchar('phone_country_code', { length: 5 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index('idx_tenant_contacts_tenant').on(table.tenantId),
+    tenantTypeIdx: uniqueIndex('idx_tenant_contacts_tenant_type').on(table.tenantId, table.type),
+  })
+);
+
+/**
+ * Tenant Archives
+ * Encrypted archives of deleted tenant data for legal retention (7 years)
+ * Per DATA_PROTECTION.md compliance requirements
+ */
+export const tenantArchives = pgTable(
+  'tenant_archives',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id').notNull(), // Original tenant ID (no FK - tenant may be deleted)
+    tenantName: varchar('tenant_name', { length: 100 }).notNull(),
+    tenantSlug: varchar('tenant_slug', { length: 50 }).notNull(),
+
+    // Archive details
+    archivePath: text('archive_path').notNull(), // S3/storage path
+    archiveSizeBytes: integer('archive_size_bytes'),
+    encryptionKeyId: varchar('encryption_key_id', { length: 100 }), // KMS key reference
+    checksumSha256: varchar('checksum_sha256', { length: 64 }),
+
+    // What's included in archive
+    archivedData: jsonb('archived_data').default({}),
+    // { users: count, workflows: count, servers: count, ... }
+
+    // Deletion details
+    deletedBy: uuid('deleted_by'), // User who initiated deletion
+    deletionReason: text('deletion_reason'),
+
+    // Legal hold - prevents automatic purge
+    legalHold: boolean('legal_hold').default(false),
+    legalHoldReason: text('legal_hold_reason'),
+    legalHoldBy: uuid('legal_hold_by'),
+    legalHoldAt: timestamp('legal_hold_at', { withTimezone: true }),
+    legalHoldUntil: timestamp('legal_hold_until', { withTimezone: true }),
+
+    // Retention
+    archivedAt: timestamp('archived_at', { withTimezone: true }).notNull().defaultNow(),
+    retentionExpiresAt: timestamp('retention_expires_at', { withTimezone: true }).notNull(),
+    purgedAt: timestamp('purged_at', { withTimezone: true }),
+
+    // Audit
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantIdx: index('idx_tenant_archives_tenant').on(table.tenantId),
+    retentionIdx: index('idx_tenant_archives_retention').on(table.retentionExpiresAt),
+    legalHoldIdx: index('idx_tenant_archives_legal_hold').on(table.legalHold),
+  })
+);
+
 // Relations
-export const tenantsRelations = relations(tenants, ({ one }) => ({
+export const tenantsRelations = relations(tenants, ({ one, many }) => ({
   securityConfig: one(tenantSecurityConfig, {
     fields: [tenants.id],
     references: [tenantSecurityConfig.tenantId],
   }),
+  contacts: many(tenantContacts),
 }));
 
 export const tenantSecurityConfigRelations = relations(tenantSecurityConfig, ({ one }) => ({
@@ -161,8 +272,19 @@ export const tenantSecurityConfigRelations = relations(tenantSecurityConfig, ({ 
   }),
 }));
 
+export const tenantContactsRelations = relations(tenantContacts, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [tenantContacts.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
 // Types
 export type Tenant = typeof tenants.$inferSelect;
 export type NewTenant = typeof tenants.$inferInsert;
 export type TenantSecurityConfig = typeof tenantSecurityConfig.$inferSelect;
 export type NewTenantSecurityConfig = typeof tenantSecurityConfig.$inferInsert;
+export type TenantContact = typeof tenantContacts.$inferSelect;
+export type NewTenantContact = typeof tenantContacts.$inferInsert;
+export type TenantArchive = typeof tenantArchives.$inferSelect;
+export type NewTenantArchive = typeof tenantArchives.$inferInsert;

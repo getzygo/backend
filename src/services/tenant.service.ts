@@ -574,6 +574,223 @@ export async function updateTenantBilling(
   return updated || null;
 }
 
+/**
+ * Tenant Settings - structured format for settings page
+ */
+export interface TenantSettings {
+  general: {
+    name: string;
+    slug: string;
+    type: string;
+    industry: string | null;
+    companySize: string | null;
+    website: string | null;
+    phone: string | null;
+    phoneCountryCode: string | null;
+    logoUrl: string | null;
+    primaryColor: string | null;
+    address: {
+      line1: string | null;
+      line2: string | null;
+      city: string | null;
+      stateProvince: string | null;
+      postalCode: string | null;
+      country: string | null;
+    };
+  };
+  legal: {
+    companyLegalName: string | null;
+    businessType: string | null;
+    incorporationDate: Date | null;
+    countryOfIncorporation: string | null;
+    registrationNumber: string | null;
+    taxId: string | null;
+    taxIdVerified: boolean;
+    vatNumber: string | null;
+    vatVerified: boolean;
+  };
+  billing: {
+    email: string | null;
+    useDifferentAddress: boolean;
+    address: string | null;
+    addressLine2: string | null;
+    city: string | null;
+    state: string | null;
+    postalCode: string | null;
+    country: string | null;
+    phone: string | null;
+    phoneCountryCode: string | null;
+  };
+  subscription: {
+    plan: string;
+    billingCycle: string | null;
+    licenseCount: number | null;
+    subscriptionStatus: string | null;
+    trialExpiresAt: Date | null;
+  };
+}
+
+/**
+ * Get all tenant settings in structured format
+ */
+export async function getTenantSettings(tenantId: string): Promise<TenantSettings | null> {
+  const tenant = await getTenantById(tenantId);
+
+  if (!tenant) {
+    return null;
+  }
+
+  return {
+    general: {
+      name: tenant.name,
+      slug: tenant.slug,
+      type: tenant.type,
+      industry: tenant.industry,
+      companySize: tenant.companySize,
+      website: tenant.website,
+      phone: tenant.phone,
+      phoneCountryCode: tenant.phoneCountryCode,
+      logoUrl: tenant.logoUrl,
+      primaryColor: tenant.primaryColor,
+      address: {
+        line1: tenant.addressLine1,
+        line2: tenant.addressLine2,
+        city: tenant.city,
+        stateProvince: tenant.stateProvince,
+        postalCode: tenant.postalCode,
+        country: tenant.country,
+      },
+    },
+    legal: {
+      companyLegalName: tenant.companyLegalName,
+      businessType: tenant.businessType,
+      incorporationDate: tenant.incorporationDate,
+      countryOfIncorporation: tenant.countryOfIncorporation,
+      registrationNumber: tenant.registrationNumber,
+      taxId: tenant.taxId,
+      taxIdVerified: tenant.taxIdVerified ?? false,
+      vatNumber: tenant.vatNumber,
+      vatVerified: tenant.vatVerified ?? false,
+    },
+    billing: {
+      email: tenant.billingEmail,
+      useDifferentAddress: tenant.useDifferentBillingAddress ?? false,
+      address: tenant.billingAddress,
+      addressLine2: tenant.billingAddressLine2,
+      city: tenant.billingCity,
+      state: tenant.billingState,
+      postalCode: tenant.billingPostalCode,
+      country: tenant.billingCountry,
+      phone: tenant.billingPhone,
+      phoneCountryCode: tenant.billingPhoneCountryCode,
+    },
+    subscription: {
+      plan: tenant.plan,
+      billingCycle: tenant.billingCycle,
+      licenseCount: tenant.licenseCount,
+      subscriptionStatus: tenant.subscriptionStatus,
+      trialExpiresAt: tenant.trialExpiresAt,
+    },
+  };
+}
+
+/**
+ * Update tenant general settings (General Tab)
+ */
+export async function updateTenantGeneralSettings(
+  tenantId: string,
+  updates: {
+    name?: string;
+    industry?: string;
+    companySize?: string;
+    website?: string;
+    phone?: string;
+    phoneCountryCode?: string;
+    addressLine1?: string;
+    addressLine2?: string;
+    city?: string;
+    stateProvince?: string;
+    postalCode?: string;
+    country?: string;
+    primaryColor?: string;
+  }
+): Promise<Tenant | null> {
+  const db = getDb();
+
+  const [updated] = await db
+    .update(tenants)
+    .set({
+      ...updates,
+      updatedAt: new Date(),
+    })
+    .where(eq(tenants.id, tenantId))
+    .returning();
+
+  return updated || null;
+}
+
+/**
+ * Update tenant legal settings (Legal Tab)
+ */
+export async function updateTenantLegalSettings(
+  tenantId: string,
+  updates: {
+    companyLegalName?: string;
+    businessType?: string;
+    incorporationDate?: Date;
+    countryOfIncorporation?: string;
+    registrationNumber?: string;
+    taxId?: string;
+    vatNumber?: string;
+  }
+): Promise<Tenant | null> {
+  const db = getDb();
+
+  const [updated] = await db
+    .update(tenants)
+    .set({
+      ...updates,
+      updatedAt: new Date(),
+    })
+    .where(eq(tenants.id, tenantId))
+    .returning();
+
+  return updated || null;
+}
+
+/**
+ * Update tenant billing settings (Billing Tab)
+ * Extended version with all billing fields
+ */
+export async function updateTenantBillingSettings(
+  tenantId: string,
+  updates: {
+    billingEmail?: string;
+    useDifferentBillingAddress?: boolean;
+    billingAddress?: string;
+    billingAddressLine2?: string;
+    billingCity?: string;
+    billingState?: string;
+    billingPostalCode?: string;
+    billingCountry?: string;
+    billingPhone?: string;
+    billingPhoneCountryCode?: string;
+  }
+): Promise<Tenant | null> {
+  const db = getDb();
+
+  const [updated] = await db
+    .update(tenants)
+    .set({
+      ...updates,
+      updatedAt: new Date(),
+    })
+    .where(eq(tenants.id, tenantId))
+    .returning();
+
+  return updated || null;
+}
+
 export const tenantService = {
   isValidSlug,
   isBlockedSlug,
@@ -593,4 +810,8 @@ export const tenantService = {
   userHasCorePlanTenant,
   checkBillingReadiness,
   updateTenantBilling,
+  getTenantSettings,
+  updateTenantGeneralSettings,
+  updateTenantLegalSettings,
+  updateTenantBillingSettings,
 };

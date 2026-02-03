@@ -46,6 +46,8 @@ import { tenantMiddleware, requireTenantMembership } from '../../middleware/tena
 import ssoRoutes from './sso.routes';
 import domainsRoutes from './domains.routes';
 import membersRoutes from './members.routes';
+import settingsRoutes from './settings.routes';
+import contactsRoutes from './contacts.routes';
 import {
   getUserTenants,
   getTenantById,
@@ -771,5 +773,11 @@ app.route('/', domainsRoutes);
 
 // Mount Member routes (Team Management)
 app.route('/', membersRoutes);
+
+// Mount Settings routes (Company Settings)
+app.route('/', settingsRoutes);
+
+// Mount Contacts routes (Company Contacts)
+app.route('/', contactsRoutes);
 
 export default app;
