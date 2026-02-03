@@ -5,6 +5,7 @@
  * Supports verification codes, password resets, security alerts, and more.
  */
 
+import { randomInt } from 'crypto';
 import { render } from '@react-email/render';
 import { getRedis, REDIS_KEYS, REDIS_TTL } from '../db/redis';
 import { getEnv } from '../config/env';
@@ -112,10 +113,10 @@ async function sendEmail({ to, subject, template, headers = {} }: SendEmailOptio
 }
 
 /**
- * Generate a 6-digit verification code
+ * Generate a cryptographically secure 6-digit verification code
  */
 function generateCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return randomInt(100000, 1000000).toString();
 }
 
 /**

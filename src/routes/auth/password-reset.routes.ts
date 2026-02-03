@@ -11,6 +11,7 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
+import { randomInt, randomBytes } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
@@ -23,22 +24,17 @@ import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../../services
 const app = new Hono();
 
 /**
- * Generate a 6-digit verification code
+ * Generate a cryptographically secure 6-digit verification code
  */
 function generateCode(): string {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return randomInt(100000, 1000000).toString();
 }
 
 /**
- * Generate a secure reset token
+ * Generate a cryptographically secure reset token
  */
 function generateResetToken(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let token = '';
-  for (let i = 0; i < 32; i++) {
-    token += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return token;
+  return randomBytes(32).toString('base64url');
 }
 
 // Request password reset schema
