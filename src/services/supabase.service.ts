@@ -174,6 +174,23 @@ export async function deleteAuthUser(userId: string): Promise<{ error: string | 
 }
 
 /**
+ * Refresh a session using a refresh token
+ */
+export async function refreshSession(refreshToken: string): Promise<AuthResult> {
+  const supabase = getSupabase();
+
+  const { data, error } = await supabase.auth.refreshSession({
+    refresh_token: refreshToken,
+  });
+
+  if (error) {
+    return { user: null, session: null, error: error.message };
+  }
+
+  return { user: data.user, session: data.session, error: null };
+}
+
+/**
  * Sign out a user (invalidate session)
  */
 export async function signOut(accessToken: string): Promise<{ error: string | null }> {
@@ -237,6 +254,7 @@ export const supabaseService = {
   createAuthUser,
   signInWithPassword,
   getSession,
+  refreshSession,
   updateAuthUser,
   deleteAuthUser,
   signOut,

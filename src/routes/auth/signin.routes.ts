@@ -24,6 +24,7 @@ import { createSession } from '../../services/session.service';
 import { checkLoginForAlerts } from '../../services/login-alert.service';
 import { getLocationFromIP } from '../../services/geolocation.service';
 import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
+import { setAuthCookies, clearAuthCookies, getAccessToken } from '../../utils/cookies';
 
 const app = new Hono();
 
@@ -292,6 +293,15 @@ app.post('/', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json', signinSchema)
     verificationStatus = await checkVerificationStatus(user, targetTenant.id);
   } else if (userTenants.length === 0) {
     // No tenants - redirect to onboarding to create first workspace
+    // Set HTTPOnly cookies before returning
+    setAuthCookies(
+      c,
+      authResult.session.access_token,
+      authResult.session.refresh_token,
+      3600,
+      604800
+    );
+
     return c.json({
       user: {
         id: user.id,
@@ -435,6 +445,16 @@ app.post('/', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json', signinSchema)
       plan: targetTenant.plan,
     };
   }
+
+  // Set HTTPOnly cookies for secure token storage
+  // Access token: 1 hour, Refresh token: 7 days
+  setAuthCookies(
+    c,
+    authResult.session.access_token,
+    authResult.session.refresh_token,
+    3600,
+    604800
+  );
 
   return c.json(response);
 });
@@ -618,23 +638,24 @@ app.post('/switch-tenant', zValidator('json', switchTenantSchema), async (c) => 
 /**
  * POST /api/v1/auth/signout
  * Sign out user and invalidate session
+ * Clears HTTPOnly cookies and invalidates token with Supabase
  */
 app.post('/signout', async (c) => {
-  const authHeader = c.req.header('Authorization');
+  // Get token from cookies or Authorization header
+  const token = getAccessToken(c);
 
-  if (!authHeader?.startsWith('Bearer ')) {
-    return c.json({ success: true });
+  if (token) {
+    try {
+      const { signOut } = await import('../../services/supabase.service');
+      await signOut(token);
+    } catch (error) {
+      console.error('Signout error:', error);
+      // Still continue - token might already be invalid
+    }
   }
 
-  const token = authHeader.slice(7);
-
-  try {
-    const { signOut } = await import('../../services/supabase.service');
-    await signOut(token);
-  } catch (error) {
-    console.error('Signout error:', error);
-    // Still return success - token might already be invalid
-  }
+  // Always clear HTTPOnly cookies
+  clearAuthCookies(c);
 
   return c.json({ success: true });
 });

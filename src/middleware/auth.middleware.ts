@@ -2,6 +2,7 @@
  * Authentication Middleware
  *
  * Validates Supabase session and attaches user to context.
+ * Supports both HTTPOnly cookies (preferred) and Authorization header (API clients).
  * Per UNIFIED_AUTH_STRATEGY.md.
  */
 
@@ -10,6 +11,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../db/client';
 import { users, type User } from '../db/schema';
 import { getSession } from '../services/supabase.service';
+import { getAccessToken } from '../utils/cookies';
 
 // Extend Hono context with user
 declare module 'hono' {
@@ -21,31 +23,11 @@ declare module 'hono' {
 
 /**
  * Auth middleware - validates Bearer token and attaches user to context
+ * Reads token from HTTPOnly cookies first, falls back to Authorization header
  */
 export async function authMiddleware(c: Context, next: Next) {
-  const authHeader = c.req.header('Authorization');
-
-  if (!authHeader) {
-    return c.json(
-      {
-        error: 'unauthorized',
-        message: 'Missing authorization header',
-      },
-      401
-    );
-  }
-
-  if (!authHeader.startsWith('Bearer ')) {
-    return c.json(
-      {
-        error: 'unauthorized',
-        message: 'Invalid authorization header format. Use: Bearer <token>',
-      },
-      401
-    );
-  }
-
-  const token = authHeader.slice(7);
+  // Get token from cookies (preferred) or Authorization header (API clients)
+  const token = getAccessToken(c);
 
   if (!token) {
     return c.json(
@@ -120,15 +102,11 @@ export async function authMiddleware(c: Context, next: Next) {
 
 /**
  * Optional auth middleware - attaches user if token present, but doesn't require it
+ * Reads token from HTTPOnly cookies first, falls back to Authorization header
  */
 export async function optionalAuthMiddleware(c: Context, next: Next) {
-  const authHeader = c.req.header('Authorization');
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return next();
-  }
-
-  const token = authHeader.slice(7);
+  // Get token from cookies (preferred) or Authorization header (API clients)
+  const token = getAccessToken(c);
 
   if (!token) {
     return next();

@@ -15,6 +15,8 @@ import { getTenantById } from '../../services/tenant.service';
 import { resolvePermissions } from '../../services/permission.service';
 import { getDb } from '../../db/client';
 import { auditLogs } from '../../db/schema';
+import { setAuthCookies, getRefreshToken, clearAuthCookies } from '../../utils/cookies';
+import { refreshSession } from '../../services/supabase.service';
 
 const app = new Hono();
 
@@ -101,6 +103,17 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
     status: 'success',
   });
 
+  // Set HTTPOnly cookies for secure token storage (if we have Supabase tokens)
+  if (payload.supabaseAccessToken && payload.supabaseRefreshToken) {
+    setAuthCookies(
+      c,
+      payload.supabaseAccessToken,
+      payload.supabaseRefreshToken,
+      3600, // 1 hour for access token
+      604800 // 7 days for refresh token
+    );
+  }
+
   // Return verified user, tenant, role, permissions, session, and tenant memberships
   // Note: avatarUrl is not exposed - frontend fetches via /users/me/avatar/file
   return c.json({
@@ -132,12 +145,108 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
     },
     permissions,
     // Supabase session tokens for authenticated API calls
+    // Note: Tokens are also stored in HTTPOnly cookies for security
     session: payload.supabaseAccessToken ? {
       access_token: payload.supabaseAccessToken,
       refresh_token: payload.supabaseRefreshToken || null,
     } : null,
     // Cached tenant memberships for tenant switcher UI (no API calls needed)
     tenantMemberships: payload.tenantMemberships || [],
+  });
+});
+
+/**
+ * POST /api/v1/auth/refresh
+ * Refresh access token using refresh token from HTTPOnly cookie
+ *
+ * This endpoint:
+ * 1. Reads refresh token from HTTPOnly cookie
+ * 2. Exchanges it for new tokens with Supabase
+ * 3. Sets new HTTPOnly cookies
+ * 4. Returns new access token (for hybrid mode support)
+ */
+app.post('/refresh', async (c) => {
+  // Get refresh token from HTTPOnly cookie
+  const refreshToken = getRefreshToken(c);
+
+  if (!refreshToken) {
+    return c.json(
+      {
+        error: 'no_refresh_token',
+        message: 'No refresh token found. Please sign in again.',
+      },
+      401
+    );
+  }
+
+  // Refresh session with Supabase
+  const result = await refreshSession(refreshToken);
+
+  if (result.error || !result.session) {
+    // Clear invalid cookies
+    clearAuthCookies(c);
+
+    return c.json(
+      {
+        error: 'refresh_failed',
+        message: result.error || 'Failed to refresh session. Please sign in again.',
+      },
+      401
+    );
+  }
+
+  // Set new HTTPOnly cookies
+  setAuthCookies(
+    c,
+    result.session.access_token,
+    result.session.refresh_token,
+    3600, // 1 hour for access token
+    604800 // 7 days for refresh token
+  );
+
+  return c.json({
+    success: true,
+    // Return new access token for hybrid mode (localStorage + cookies)
+    // Frontend can use this to update in-memory token
+    access_token: result.session.access_token,
+    expires_at: result.session.expires_at,
+  });
+});
+
+/**
+ * GET /api/v1/auth/check
+ * Check if user is authenticated via HTTPOnly cookie
+ *
+ * This endpoint allows the frontend to check auth status without
+ * exposing tokens to JavaScript. Returns user info if authenticated.
+ */
+app.get('/check', async (c) => {
+  const { getAccessToken } = await import('../../utils/cookies');
+  const { getSession } = await import('../../services/supabase.service');
+
+  const token = getAccessToken(c);
+
+  if (!token) {
+    return c.json({
+      authenticated: false,
+    });
+  }
+
+  // Validate token with Supabase
+  const sessionResult = await getSession(token);
+
+  if (sessionResult.error || !sessionResult.user) {
+    return c.json({
+      authenticated: false,
+    });
+  }
+
+  return c.json({
+    authenticated: true,
+    user: {
+      id: sessionResult.user.id,
+      email: sessionResult.user.email,
+    },
   });
 });
 
