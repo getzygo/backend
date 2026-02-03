@@ -13,9 +13,13 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth.middleware';
+import { tenantMiddleware } from '../../middleware/tenant.middleware';
 import { notificationService, ALERT_POLICIES } from '../../services/notification.service';
 
 const app = new Hono();
+
+// Apply auth and tenant middleware to all routes
+app.use('*', authMiddleware, tenantMiddleware);
 
 // Update preferences schema
 const updatePreferencesSchema = z.object({
@@ -56,19 +60,9 @@ const pauseSchema = z.object({
  * GET /api/v1/notifications/preferences
  * Get notification preferences for the current user in current tenant
  */
-app.get('/', authMiddleware, async (c) => {
+app.get('/', async (c) => {
   const user = c.get('user');
   const tenant = c.get('tenant');
-
-  if (!tenant) {
-    return c.json(
-      {
-        error: 'tenant_required',
-        message: 'Tenant context is required',
-      },
-      400
-    );
-  }
 
   const prefs = await notificationService.getOrCreatePreferences(user.id, tenant.id);
 
@@ -92,20 +86,10 @@ app.get('/', authMiddleware, async (c) => {
  * PATCH /api/v1/notifications/preferences
  * Update notification preferences
  */
-app.patch('/', authMiddleware, zValidator('json', updatePreferencesSchema), async (c) => {
+app.patch('/', zValidator('json', updatePreferencesSchema), async (c) => {
   const user = c.get('user');
   const tenant = c.get('tenant');
   const body = c.req.valid('json');
-
-  if (!tenant) {
-    return c.json(
-      {
-        error: 'tenant_required',
-        message: 'Tenant context is required',
-      },
-      400
-    );
-  }
 
   // Map snake_case to camelCase for the service
   const updates: Parameters<typeof notificationService.updatePreferences>[2] = {};
@@ -159,20 +143,10 @@ app.patch('/', authMiddleware, zValidator('json', updatePreferencesSchema), asyn
  * POST /api/v1/notifications/preferences/pause
  * Temporarily pause notifications
  */
-app.post('/pause', authMiddleware, zValidator('json', pauseSchema), async (c) => {
+app.post('/pause', zValidator('json', pauseSchema), async (c) => {
   const user = c.get('user');
   const tenant = c.get('tenant');
   const body = c.req.valid('json');
-
-  if (!tenant) {
-    return c.json(
-      {
-        error: 'tenant_required',
-        message: 'Tenant context is required',
-      },
-      400
-    );
-  }
 
   let pauseUntil: Date;
 
@@ -209,19 +183,9 @@ app.post('/pause', authMiddleware, zValidator('json', pauseSchema), async (c) =>
  * POST /api/v1/notifications/preferences/resume
  * Resume notifications (clear pause)
  */
-app.post('/resume', authMiddleware, async (c) => {
+app.post('/resume', async (c) => {
   const user = c.get('user');
   const tenant = c.get('tenant');
-
-  if (!tenant) {
-    return c.json(
-      {
-        error: 'tenant_required',
-        message: 'Tenant context is required',
-      },
-      400
-    );
-  }
 
   await notificationService.resumeNotifications(user.id, tenant.id);
 

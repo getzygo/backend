@@ -14,9 +14,13 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth.middleware';
+import { tenantMiddleware } from '../../middleware/tenant.middleware';
 import { notificationService } from '../../services/notification.service';
 
 const app = new Hono();
+
+// Apply auth and tenant middleware to all routes
+app.use('*', authMiddleware, tenantMiddleware);
 
 // Query params schema for listing
 const listQuerySchema = z.object({
@@ -33,19 +37,9 @@ const listQuerySchema = z.object({
  * List notifications for the current user in current tenant
  * Rate limit: 60 req/min
  */
-app.get('/', authMiddleware, async (c) => {
+app.get('/', async (c) => {
   const user = c.get('user');
   const tenant = c.get('tenant');
-
-  if (!tenant) {
-    return c.json(
-      {
-        error: 'tenant_required',
-        message: 'Tenant context is required',
-      },
-      400
-    );
-  }
 
   // Parse query params
   const query = c.req.query();
@@ -97,19 +91,9 @@ app.get('/', authMiddleware, async (c) => {
  * Get unread notification count
  * Rate limit: 60 req/min (for polling)
  */
-app.get('/unread/count', authMiddleware, async (c) => {
+app.get('/unread/count', async (c) => {
   const user = c.get('user');
   const tenant = c.get('tenant');
-
-  if (!tenant) {
-    return c.json(
-      {
-        error: 'tenant_required',
-        message: 'Tenant context is required',
-      },
-      400
-    );
-  }
 
   const count = await notificationService.getUnreadCount(user.id, tenant.id);
 
@@ -120,20 +104,10 @@ app.get('/unread/count', authMiddleware, async (c) => {
  * PATCH /api/v1/notifications/:id/read
  * Mark a notification as read
  */
-app.patch('/:id/read', authMiddleware, async (c) => {
+app.patch('/:id/read', async (c) => {
   const user = c.get('user');
   const tenant = c.get('tenant');
   const notificationId = c.req.param('id');
-
-  if (!tenant) {
-    return c.json(
-      {
-        error: 'tenant_required',
-        message: 'Tenant context is required',
-      },
-      400
-    );
-  }
 
   // Validate UUID format
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -167,19 +141,9 @@ app.patch('/:id/read', authMiddleware, async (c) => {
  * Mark all notifications as read
  * Rate limit: 10 req/min (prevent spam)
  */
-app.post('/read-all', authMiddleware, async (c) => {
+app.post('/read-all', async (c) => {
   const user = c.get('user');
   const tenant = c.get('tenant');
-
-  if (!tenant) {
-    return c.json(
-      {
-        error: 'tenant_required',
-        message: 'Tenant context is required',
-      },
-      400
-    );
-  }
 
   const count = await notificationService.markAllAsRead(user.id, tenant.id);
 
@@ -193,20 +157,10 @@ app.post('/read-all', authMiddleware, async (c) => {
  * DELETE /api/v1/notifications/:id
  * Delete a notification
  */
-app.delete('/:id', authMiddleware, async (c) => {
+app.delete('/:id', async (c) => {
   const user = c.get('user');
   const tenant = c.get('tenant');
   const notificationId = c.req.param('id');
-
-  if (!tenant) {
-    return c.json(
-      {
-        error: 'tenant_required',
-        message: 'Tenant context is required',
-      },
-      400
-    );
-  }
 
   // Validate UUID format
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
