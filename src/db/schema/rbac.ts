@@ -145,6 +145,10 @@ export const tenantMembers = pgTable(
     // Owner flag - marks the tenant owner (only one per tenant)
     isOwner: boolean('is_owner').notNull().default(false),
 
+    // Tenant-scoped profile fields (user can have different values per tenant)
+    jobTitle: varchar('job_title', { length: 100 }),
+    reportingManagerId: uuid('reporting_manager_id').references(() => users.id, { onDelete: 'set null' }),
+
     // Membership status
     status: varchar('status', { length: 20 }).notNull().default('active'),
     // 'active' | 'suspended' | 'removed'

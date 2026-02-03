@@ -15,9 +15,10 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { authMiddleware } from '../middleware/auth.middleware';
-import { tenantMiddleware, requireTenantMembership } from '../middleware/tenant.middleware';
+import { tenantMiddleware, optionalTenantMiddleware, requireTenantMembership } from '../middleware/tenant.middleware';
 import { getDb } from '../db/client';
-import { users, auditLogs } from '../db/schema';
+import { users, auditLogs, tenantMembers } from '../db/schema';
+import { and } from 'drizzle-orm';
 import {
   extractStoragePath,
   isExternalAvatarUrl,
@@ -62,28 +63,52 @@ const updateProfilePublicSchema = z.object({
  * GET /api/v1/users/me
  * Get current user's profile
  * Note: Avatar URL is not exposed - use GET /users/me/avatar/file to fetch avatar
+ *
+ * Tenant-scoped fields (job_title, reporting_manager_id) require tenant context:
+ * - Send X-Zygo-Tenant-Slug header to get tenant-specific values
+ * - Without tenant context, these fields return null
  */
-app.get('/me', authMiddleware, async (c) => {
+app.get('/me', authMiddleware, optionalTenantMiddleware, async (c) => {
   const user = c.get('user');
+  const tenantId = c.get('tenantId'); // May be undefined if no tenant context
   const db = getDb();
 
   const currentAvatarPath = user.avatarUrl;
   const avatarSource = user.avatarSource;
 
-  // Fetch reporting manager info if set
+  // Fetch tenant-scoped fields if tenant context is provided
+  let jobTitle: string | null = null;
+  let reportingManagerId: string | null = null;
   let reportingManager = null;
-  if (user.reportingManagerId) {
-    const manager = await db.query.users.findFirst({
-      where: eq(users.id, user.reportingManagerId),
-      columns: { id: true, firstName: true, lastName: true, email: true },
+
+  if (tenantId) {
+    // Get tenant membership with tenant-scoped profile fields
+    const membership = await db.query.tenantMembers.findFirst({
+      where: and(
+        eq(tenantMembers.tenantId, tenantId),
+        eq(tenantMembers.userId, user.id)
+      ),
     });
-    if (manager) {
-      reportingManager = {
-        id: manager.id,
-        first_name: manager.firstName,
-        last_name: manager.lastName,
-        email: manager.email,
-      };
+
+    if (membership) {
+      jobTitle = membership.jobTitle;
+      reportingManagerId = membership.reportingManagerId;
+
+      // Fetch reporting manager info if set
+      if (reportingManagerId) {
+        const manager = await db.query.users.findFirst({
+          where: eq(users.id, reportingManagerId),
+          columns: { id: true, firstName: true, lastName: true, email: true },
+        });
+        if (manager) {
+          reportingManager = {
+            id: manager.id,
+            first_name: manager.firstName,
+            last_name: manager.lastName,
+            email: manager.email,
+          };
+        }
+      }
     }
   }
 
@@ -93,8 +118,9 @@ app.get('/me', authMiddleware, async (c) => {
     title: user.title,
     first_name: user.firstName,
     last_name: user.lastName,
-    job_title: user.jobTitle,
-    reporting_manager_id: user.reportingManagerId,
+    // Tenant-scoped fields
+    job_title: jobTitle,
+    reporting_manager_id: reportingManagerId,
     reporting_manager: reportingManager,
     // Avatar: no URL exposed - fetch via /users/me/avatar/file
     has_avatar: !!currentAvatarPath,
@@ -269,84 +295,135 @@ app.post('/me/avatar', authMiddleware, tenantMiddleware, requireTenantMembership
 /**
  * PATCH /api/v1/users/me
  * Update current user's profile
+ *
+ * Tenant-scoped fields (job_title, reporting_manager_id) require tenant context:
+ * - Send X-Zygo-Tenant-Slug header to update tenant-specific values
+ * - Without tenant context, these fields are ignored
  */
-app.patch('/me', authMiddleware, zValidator('json', updateProfileSchema), async (c) => {
+app.patch('/me', authMiddleware, optionalTenantMiddleware, zValidator('json', updateProfileSchema), async (c) => {
   const user = c.get('user');
+  const tenantId = c.get('tenantId'); // May be undefined if no tenant context
   const body = c.req.valid('json');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
 
-  // Build update object
-  const updates: Record<string, any> = {
+  const db = getDb();
+
+  // Build update object for user-level fields
+  const userUpdates: Record<string, any> = {
     updatedAt: new Date(),
   };
 
   if (body.title !== undefined) {
-    updates.title = body.title || null;
+    userUpdates.title = body.title || null;
   }
   if (body.first_name !== undefined) {
-    updates.firstName = body.first_name;
+    userUpdates.firstName = body.first_name;
   }
   if (body.last_name !== undefined) {
-    updates.lastName = body.last_name;
-  }
-  if (body.job_title !== undefined) {
-    updates.jobTitle = body.job_title || null;
-  }
-  if (body.reporting_manager_id !== undefined) {
-    updates.reportingManagerId = body.reporting_manager_id || null;
+    userUpdates.lastName = body.last_name;
   }
   // Note: avatar_url updates are no longer accepted via PATCH
   // Use POST /users/me/avatar to upload avatars with tenant scoping
   // Phone fields
   if (body.phone !== undefined) {
-    updates.phone = body.phone;
+    userUpdates.phone = body.phone;
     // Reset phone verification if phone number changes
     if (body.phone !== user.phone) {
-      updates.phoneVerified = false;
+      userUpdates.phoneVerified = false;
     }
   }
   if (body.phone_country_code !== undefined) {
-    updates.phoneCountryCode = body.phone_country_code;
+    userUpdates.phoneCountryCode = body.phone_country_code;
   }
   // Address fields
   if (body.address_line_1 !== undefined) {
-    updates.addressLine1 = body.address_line_1;
+    userUpdates.addressLine1 = body.address_line_1;
   }
   if (body.address_line_2 !== undefined) {
-    updates.addressLine2 = body.address_line_2;
+    userUpdates.addressLine2 = body.address_line_2;
   }
   if (body.city !== undefined) {
-    updates.city = body.city;
+    userUpdates.city = body.city;
   }
   if (body.state !== undefined) {
-    updates.state = body.state;
+    userUpdates.state = body.state;
   }
   if (body.state_code !== undefined) {
-    updates.stateCode = body.state_code;
+    userUpdates.stateCode = body.state_code;
   }
   if (body.country !== undefined) {
-    updates.country = body.country;
+    userUpdates.country = body.country;
   }
   if (body.postal_code !== undefined) {
-    updates.postalCode = body.postal_code;
+    userUpdates.postalCode = body.postal_code;
   }
 
-  // Update user
-  const db = getDb();
+  // Update user-level fields
   const [updatedUser] = await db
     .update(users)
-    .set(updates)
+    .set(userUpdates)
     .where(eq(users.id, user.id))
     .returning();
 
+  // Handle tenant-scoped fields (job_title, reporting_manager_id)
+  let jobTitle: string | null = null;
+  let reportingManagerId: string | null = null;
+  const tenantUpdates: string[] = [];
+
+  if (tenantId) {
+    // Build tenant-scoped updates
+    const memberUpdates: Record<string, any> = {
+      updatedAt: new Date(),
+    };
+
+    if (body.job_title !== undefined) {
+      memberUpdates.jobTitle = body.job_title || null;
+      tenantUpdates.push('job_title');
+    }
+    if (body.reporting_manager_id !== undefined) {
+      memberUpdates.reportingManagerId = body.reporting_manager_id || null;
+      tenantUpdates.push('reporting_manager_id');
+    }
+
+    // Update tenant_members if there are tenant-scoped updates
+    if (tenantUpdates.length > 0) {
+      await db
+        .update(tenantMembers)
+        .set(memberUpdates)
+        .where(
+          and(
+            eq(tenantMembers.tenantId, tenantId),
+            eq(tenantMembers.userId, user.id)
+          )
+        );
+    }
+
+    // Fetch updated tenant membership
+    const membership = await db.query.tenantMembers.findFirst({
+      where: and(
+        eq(tenantMembers.tenantId, tenantId),
+        eq(tenantMembers.userId, user.id)
+      ),
+    });
+
+    if (membership) {
+      jobTitle = membership.jobTitle;
+      reportingManagerId = membership.reportingManagerId;
+    }
+  }
+
   // Audit log
+  const allUpdates = [
+    ...Object.keys(userUpdates).filter(k => k !== 'updatedAt'),
+    ...tenantUpdates,
+  ];
   await db.insert(auditLogs).values({
     userId: user.id,
     action: 'profile_updated',
     resourceType: 'user',
     resourceId: user.id,
-    details: { updates: Object.keys(updates).filter(k => k !== 'updatedAt') },
+    details: { updates: allUpdates, tenant_id: tenantId || null },
     ipAddress: ipAddress || undefined,
     userAgent: userAgent || undefined,
     status: 'success',
@@ -358,8 +435,9 @@ app.patch('/me', authMiddleware, zValidator('json', updateProfileSchema), async 
     title: updatedUser.title,
     first_name: updatedUser.firstName,
     last_name: updatedUser.lastName,
-    job_title: updatedUser.jobTitle,
-    reporting_manager_id: updatedUser.reportingManagerId,
+    // Tenant-scoped fields
+    job_title: jobTitle,
+    reporting_manager_id: reportingManagerId,
     // Avatar: no URL exposed - fetch via /users/me/avatar/file
     has_avatar: !!updatedUser.avatarUrl,
     avatar_source: updatedUser.avatarSource,
@@ -447,15 +525,67 @@ app.patch('/me/public', zValidator('json', updateProfilePublicSchema), async (c)
  * GET /api/v1/users/search
  * Search users for reporting manager selection
  * Returns users matching the search query (by name or email)
+ *
+ * If tenant context is provided (X-Zygo-Tenant-Slug header):
+ * - Only searches within tenant members
+ * - Returns tenant-scoped job_title
  */
-app.get('/search', authMiddleware, async (c) => {
+app.get('/search', authMiddleware, optionalTenantMiddleware, async (c) => {
   const user = c.get('user');
+  const tenantId = c.get('tenantId'); // May be undefined if no tenant context
   const query = c.req.query('q') || '';
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 50);
 
   const db = getDb();
 
-  // Search users by name or email (excluding current user)
+  if (tenantId) {
+    // Search within tenant members only
+    const memberships = await db.query.tenantMembers.findMany({
+      where: and(
+        eq(tenantMembers.tenantId, tenantId),
+        eq(tenantMembers.status, 'active')
+      ),
+      with: {
+        user: {
+          columns: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            avatarUrl: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    // Filter by search query and exclude current user
+    const filtered = memberships
+      .filter((m) => {
+        if (!m.user || m.user.id === user.id || m.user.status === 'deleted') return false;
+        if (!query) return true;
+        const lowerQuery = query.toLowerCase();
+        return (
+          m.user.firstName?.toLowerCase().includes(lowerQuery) ||
+          m.user.lastName?.toLowerCase().includes(lowerQuery) ||
+          m.user.email.toLowerCase().includes(lowerQuery)
+        );
+      })
+      .slice(0, limit);
+
+    return c.json({
+      users: filtered.map((m) => ({
+        id: m.user!.id,
+        first_name: m.user!.firstName,
+        last_name: m.user!.lastName,
+        email: m.user!.email,
+        has_avatar: !!m.user!.avatarUrl,
+        job_title: m.jobTitle, // Tenant-scoped job title
+      })),
+    });
+  }
+
+  // Fallback: search all users (no tenant context)
   const searchResults = await db.query.users.findMany({
     where: (users, { and, or, ne, ilike }) =>
       and(
@@ -475,7 +605,6 @@ app.get('/search', authMiddleware, async (c) => {
       lastName: true,
       email: true,
       avatarUrl: true,
-      jobTitle: true,
     },
     limit,
     orderBy: (users, { asc }) => [asc(users.firstName), asc(users.lastName)],
@@ -487,9 +616,8 @@ app.get('/search', authMiddleware, async (c) => {
       first_name: u.firstName,
       last_name: u.lastName,
       email: u.email,
-      // Avatar: no URL exposed - fetch via /users/{userId}/avatar/file
       has_avatar: !!u.avatarUrl,
-      job_title: u.jobTitle,
+      job_title: null, // No tenant context, no job_title
     })),
   });
 });
