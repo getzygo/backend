@@ -13,7 +13,6 @@ import {
   revokeSession,
   revokeAllSessions,
 } from '../../services/session.service';
-import { signOutUser } from '../../services/supabase.service';
 
 const app = new Hono();
 
@@ -51,7 +50,8 @@ app.get('/', authMiddleware, async (c) => {
 /**
  * POST /api/v1/auth/sessions/:id/revoke
  * Revoke a specific session.
- * Also invalidates all Supabase sessions to ensure the revoked session can't make API calls.
+ * Note: The revoked session's JWT will remain valid until it expires (typically 1 hour).
+ * For immediate invalidation of all sessions, use revoke-all.
  */
 app.post('/:id/revoke', authMiddleware, async (c) => {
   const user = c.get('user');
@@ -71,24 +71,20 @@ app.post('/:id/revoke', authMiddleware, async (c) => {
     );
   }
 
-  // Invalidate all Supabase sessions for this user to ensure revoked session can't make API calls
-  // This is a security measure - the user will need to re-login on all devices
-  const signOutResult = await signOutUser(user.id);
-  if (signOutResult.error) {
-    console.error('Failed to sign out user from Supabase:', signOutResult.error);
-  }
+  // Don't call signOutUser here - that would log out ALL sessions including the current one.
+  // The revoked session's JWT will expire naturally (typically 1 hour).
+  // This is the expected behavior for revoking a single session.
 
   return c.json({
     success: true,
-    message: 'Session revoked successfully. You may need to sign in again on all devices.',
-    requires_reauth: true,
+    message: 'Session revoked successfully.',
   });
 });
 
 /**
  * POST /api/v1/auth/sessions/revoke-all
  * Revoke all sessions except the current one.
- * Also invalidates all Supabase sessions for security.
+ * Note: Revoked sessions' JWTs will remain valid until they expire (typically 1 hour).
  */
 app.post('/revoke-all', authMiddleware, async (c) => {
   const user = c.get('user');
@@ -105,19 +101,13 @@ app.post('/revoke-all', authMiddleware, async (c) => {
     userAgent
   );
 
-  // Invalidate all Supabase sessions for security
-  if (revokedCount > 0) {
-    const signOutResult = await signOutUser(user.id);
-    if (signOutResult.error) {
-      console.error('Failed to sign out user from Supabase:', signOutResult.error);
-    }
-  }
+  // Don't call signOutUser here - that would log out the current session too.
+  // Revoked sessions' JWTs will expire naturally (typically 1 hour).
 
   return c.json({
     success: true,
-    message: `${revokedCount} session${revokedCount !== 1 ? 's' : ''} revoked. You may need to sign in again.`,
+    message: `${revokedCount} session${revokedCount !== 1 ? 's' : ''} revoked.`,
     revoked_count: revokedCount,
-    requires_reauth: revokedCount > 0,
   });
 });
 
