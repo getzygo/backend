@@ -51,8 +51,8 @@ const signupSchema = z.object({
     .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character'),
   first_name: z.string().max(100).optional().default(''),
   last_name: z.string().max(100).optional().default(''),
-  phone: z.string().min(5, 'Phone number is required').max(20),
-  phone_country_code: z.string().min(1).max(5),
+  phone: z.string().min(5).max(20).optional(),
+  phone_country_code: z.string().min(1).max(5).optional(),
   country: z.string().length(2, 'Country must be ISO 3166-1 alpha-2 code'),
   city: z.string().min(1, 'City is required').max(100),
 

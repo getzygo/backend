@@ -384,7 +384,54 @@ app.patch('/me', authMiddleware, optionalTenantMiddleware, zValidator('json', up
       tenantUpdates.push('job_title');
     }
     if (body.reporting_manager_id !== undefined) {
-      memberUpdates.reportingManagerId = body.reporting_manager_id || null;
+      const newManagerId = body.reporting_manager_id || null;
+
+      // Validate: Can't set self as reporting manager
+      if (newManagerId && newManagerId === user.id) {
+        return c.json(
+          {
+            error: 'invalid_manager',
+            message: 'You cannot set yourself as your own reporting manager',
+          },
+          400
+        );
+      }
+
+      // Validate: Check for circular reporting chain
+      // If newManagerId reports to current user (directly or indirectly), it creates a cycle
+      if (newManagerId) {
+        const visited = new Set<string>();
+        let currentId: string | null = newManagerId;
+
+        while (currentId) {
+          if (currentId === user.id) {
+            return c.json(
+              {
+                error: 'circular_manager',
+                message: 'This would create a circular reporting relationship',
+              },
+              400
+            );
+          }
+          if (visited.has(currentId)) {
+            break; // Already checked this path
+          }
+          visited.add(currentId);
+
+          // Get the manager's manager
+          const managerMembership: { reportingManagerId: string | null } | undefined = await db.query.tenantMembers.findFirst({
+            where: and(
+              eq(tenantMembers.tenantId, tenantId),
+              eq(tenantMembers.userId, currentId)
+            ),
+            columns: { reportingManagerId: true },
+          });
+
+          currentId = managerMembership?.reportingManagerId ?? null;
+        }
+      }
+
+      memberUpdates.reportingManagerId = newManagerId;
       tenantUpdates.push('reporting_manager_id');
     }
 
