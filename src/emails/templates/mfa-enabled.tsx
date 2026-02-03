@@ -21,12 +21,14 @@ interface MfaEnabledProps {
   firstName?: string;
   method?: 'totp' | 'webauthn' | 'sms';
   enabledAt?: Date;
+  appUrl?: string;
 }
 
 export function MfaEnabled({
   firstName = 'there',
   method = 'totp',
   enabledAt = new Date(),
+  appUrl = 'https://app.getzygo.com',
 }: MfaEnabledProps) {
   const formattedDate = enabledAt.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -92,7 +94,7 @@ export function MfaEnabled({
             </Section>
 
             <Section style={buttonContainerStyle}>
-              <Button href="https://app.getzygo.com/settings/security">
+              <Button href={`${appUrl}/settings/security`}>
                 View Security Settings
               </Button>
             </Section>
@@ -111,7 +113,7 @@ export function MfaEnabled({
             </Text>
           </Section>
 
-          <Footer includeUnsubscribe={true} unsubscribeUrl="https://app.getzygo.com/settings/notifications" />
+          <Footer includeUnsubscribe={true} unsubscribeUrl={`${appUrl}/settings/notifications`} />
         </Container>
       </Body>
     </Html>

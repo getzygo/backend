@@ -22,6 +22,7 @@ interface BackupCodesRegeneratedProps {
   regeneratedAt?: Date;
   ipAddress?: string;
   deviceInfo?: string;
+  appUrl?: string;
 }
 
 export function BackupCodesRegenerated({
@@ -29,6 +30,7 @@ export function BackupCodesRegenerated({
   regeneratedAt = new Date(),
   ipAddress,
   deviceInfo,
+  appUrl = 'https://app.getzygo.com',
 }: BackupCodesRegeneratedProps) {
   const formattedDate = regeneratedAt.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -90,7 +92,7 @@ export function BackupCodesRegenerated({
             </Text>
 
             <Section style={buttonContainerStyle}>
-              <Button href="https://app.getzygo.com/settings/security">
+              <Button href={`${appUrl}/settings/security`}>
                 View Security Settings
               </Button>
             </Section>
@@ -109,7 +111,7 @@ export function BackupCodesRegenerated({
             </Text>
           </Section>
 
-          <Footer includeUnsubscribe={true} unsubscribeUrl="https://app.getzygo.com/settings/notifications" />
+          <Footer includeUnsubscribe={true} unsubscribeUrl={`${appUrl}/settings/notifications`} />
         </Container>
       </Body>
     </Html>

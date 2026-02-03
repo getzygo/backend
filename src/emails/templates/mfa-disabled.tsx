@@ -22,6 +22,7 @@ interface MfaDisabledProps {
   disabledAt?: Date;
   ipAddress?: string;
   deviceInfo?: string;
+  appUrl?: string;
 }
 
 export function MfaDisabled({
@@ -29,6 +30,7 @@ export function MfaDisabled({
   disabledAt = new Date(),
   ipAddress,
   deviceInfo,
+  appUrl = 'https://app.getzygo.com',
 }: MfaDisabledProps) {
   const formattedDate = disabledAt.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -90,13 +92,13 @@ export function MfaDisabled({
             </AlertBox>
 
             <Section style={buttonContainerStyle}>
-              <Button href="https://app.getzygo.com/settings/security" variant="danger">
+              <Button href={`${appUrl}/settings/security`} variant="danger">
                 Secure Your Account
               </Button>
             </Section>
 
             <Text style={helpTextStyle}>
-              <Link href="https://app.getzygo.com/settings/sessions" style={linkStyle}>
+              <Link href={`${appUrl}/settings/sessions`} style={linkStyle}>
                 View all active sessions
               </Link>
               {' • '}

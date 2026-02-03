@@ -25,6 +25,7 @@ interface SessionRevokedProps {
   revokedAt?: Date;
   revokedBy?: 'user' | 'admin' | 'system';
   revokerDevice?: string;
+  appUrl?: string;
 }
 
 export function SessionRevoked({
@@ -35,6 +36,7 @@ export function SessionRevoked({
   revokedAt = new Date(),
   revokedBy = 'user',
   revokerDevice,
+  appUrl = 'https://app.getzygo.com',
 }: SessionRevokedProps) {
   const formattedDate = revokedAt.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -121,13 +123,13 @@ export function SessionRevoked({
             )}
 
             <Section style={buttonContainerStyle}>
-              <Button href="https://app.getzygo.com/settings/sessions">
+              <Button href={`${appUrl}/settings/sessions`}>
                 Manage Active Sessions
               </Button>
             </Section>
 
             <Text style={helpTextStyle}>
-              <Link href="https://app.getzygo.com/settings/security" style={linkStyle}>
+              <Link href={`${appUrl}/settings/security`} style={linkStyle}>
                 Security settings
               </Link>
               {' • '}
@@ -143,7 +145,7 @@ export function SessionRevoked({
             </Text>
           </Section>
 
-          <Footer includeUnsubscribe={true} unsubscribeUrl="https://app.getzygo.com/settings/notifications" />
+          <Footer includeUnsubscribe={true} unsubscribeUrl={`${appUrl}/settings/notifications`} />
         </Container>
       </Body>
     </Html>

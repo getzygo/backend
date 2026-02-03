@@ -27,6 +27,7 @@ interface LoginAlertProps {
   ipAddress?: string;
   timestamp?: Date;
   isSuspicious?: boolean;
+  appUrl?: string;
 }
 
 export function LoginAlert({
@@ -39,6 +40,7 @@ export function LoginAlert({
   ipAddress,
   timestamp = new Date(),
   isSuspicious = false,
+  appUrl = 'https://app.getzygo.com',
 }: LoginAlertProps) {
   const formattedDate = timestamp.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -128,7 +130,7 @@ export function LoginAlert({
 
             <Section style={buttonContainerStyle}>
               <Button
-                href="https://app.getzygo.com/settings/security"
+                href={`${appUrl}/settings/security`}
                 variant={isSuspicious ? 'danger' : 'primary'}
               >
                 Review Security Settings
@@ -136,7 +138,7 @@ export function LoginAlert({
             </Section>
 
             <Text style={helpTextStyle}>
-              <Link href="https://app.getzygo.com/settings/sessions" style={linkStyle}>
+              <Link href={`${appUrl}/settings/sessions`} style={linkStyle}>
                 View all active sessions
               </Link>
               {' • '}
@@ -152,7 +154,7 @@ export function LoginAlert({
             </Text>
           </Section>
 
-          <Footer includeUnsubscribe={!isSuspicious} unsubscribeUrl="https://app.getzygo.com/settings/notifications" />
+          <Footer includeUnsubscribe={!isSuspicious} unsubscribeUrl={`${appUrl}/settings/notifications`} />
         </Container>
       </Body>
     </Html>

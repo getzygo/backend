@@ -19,9 +19,10 @@ import { Header, Footer, Button } from '../components';
 
 interface WelcomeProps {
   firstName?: string;
+  appUrl?: string;
 }
 
-export function Welcome({ firstName = 'there' }: WelcomeProps) {
+export function Welcome({ firstName = 'there', appUrl = 'https://app.getzygo.com' }: WelcomeProps) {
   return (
     <Html>
       <Head />
@@ -58,7 +59,7 @@ export function Welcome({ firstName = 'there' }: WelcomeProps) {
             </Section>
 
             <Section style={buttonContainerStyle}>
-              <Button href="https://app.getzygo.com/dashboard">
+              <Button href={`${appUrl}/dashboard`}>
                 Go to Dashboard
               </Button>
             </Section>
@@ -84,7 +85,7 @@ export function Welcome({ firstName = 'there' }: WelcomeProps) {
             </Text>
           </Section>
 
-          <Footer includeUnsubscribe={true} unsubscribeUrl="https://app.getzygo.com/settings/notifications" />
+          <Footer includeUnsubscribe={true} unsubscribeUrl={`${appUrl}/settings/notifications`} />
         </Container>
       </Body>
     </Html>

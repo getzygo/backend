@@ -22,6 +22,7 @@ interface PasswordChangedProps {
   changedAt?: Date;
   ipAddress?: string;
   deviceInfo?: string;
+  appUrl?: string;
 }
 
 export function PasswordChanged({
@@ -29,6 +30,7 @@ export function PasswordChanged({
   changedAt = new Date(),
   ipAddress,
   deviceInfo,
+  appUrl = 'https://app.getzygo.com',
 }: PasswordChangedProps) {
   const formattedDate = changedAt.toLocaleDateString('en-US', {
     weekday: 'long',
@@ -83,7 +85,7 @@ export function PasswordChanged({
             </AlertBox>
 
             <Section style={buttonContainerStyle}>
-              <Button href="https://app.getzygo.com/settings/security" variant="danger">
+              <Button href={`${appUrl}/settings/security`} variant="danger">
                 Review Security Settings
               </Button>
             </Section>

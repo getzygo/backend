@@ -246,8 +246,10 @@ export async function sendPasswordResetEmail(
 export async function sendPasswordChangedEmail(
   email: string,
   firstName?: string,
-  details?: { ipAddress?: string; deviceInfo?: string }
+  details?: { ipAddress?: string; deviceInfo?: string; appUrl?: string }
 ): Promise<SendEmailResult> {
+  const baseUrl = details?.appUrl || 'https://app.getzygo.com';
+
   if (!isSmtpConfigured()) {
     console.log(`[DEV] Password changed notification would be sent to ${email}`);
     return { sent: true };
@@ -261,6 +263,7 @@ export async function sendPasswordChangedEmail(
       changedAt: new Date(),
       ipAddress: details?.ipAddress,
       deviceInfo: details?.deviceInfo,
+      appUrl: baseUrl,
     }),
   });
 }
@@ -270,8 +273,11 @@ export async function sendPasswordChangedEmail(
  */
 export async function sendWelcomeEmail(
   email: string,
-  firstName?: string
+  firstName?: string,
+  appUrl?: string
 ): Promise<SendEmailResult> {
+  const baseUrl = appUrl || 'https://app.getzygo.com';
+
   if (!isSmtpConfigured()) {
     console.log(`[DEV] Welcome email would be sent to ${email}`);
     return { sent: true };
@@ -280,9 +286,9 @@ export async function sendWelcomeEmail(
   return sendEmail({
     to: email,
     subject: 'Welcome to Zygo!',
-    template: Welcome({ firstName: firstName || 'there' }),
+    template: Welcome({ firstName: firstName || 'there', appUrl: baseUrl }),
     headers: {
-      'List-Unsubscribe': '<https://app.getzygo.com/settings/notifications>',
+      'List-Unsubscribe': `<${baseUrl}/settings/notifications>`,
     },
   });
 }
@@ -301,8 +307,11 @@ export async function sendLoginAlertEmail(
     location?: string;
     ipAddress?: string;
     isSuspicious?: boolean;
+    appUrl?: string;
   }
 ): Promise<SendEmailResult> {
+  const baseUrl = details.appUrl || 'https://app.getzygo.com';
+
   if (!isSmtpConfigured()) {
     console.log(`[DEV] Login alert would be sent to ${email}:`, details);
     return { sent: true };
@@ -325,11 +334,12 @@ export async function sendLoginAlertEmail(
       ipAddress: details.ipAddress,
       timestamp: new Date(),
       isSuspicious: details.isSuspicious,
+      appUrl: baseUrl,
     }),
     // Suspicious login alerts cannot be unsubscribed
     headers: details.isSuspicious
       ? {}
-      : { 'List-Unsubscribe': '<https://app.getzygo.com/settings/notifications>' },
+      : { 'List-Unsubscribe': `<${baseUrl}/settings/notifications>` },
   });
 }
 
@@ -339,8 +349,11 @@ export async function sendLoginAlertEmail(
 export async function sendMfaEnabledEmail(
   email: string,
   firstName?: string,
-  method?: 'totp' | 'webauthn' | 'sms'
+  method?: 'totp' | 'webauthn' | 'sms',
+  appUrl?: string
 ): Promise<SendEmailResult> {
+  const baseUrl = appUrl || 'https://app.getzygo.com';
+
   if (!isSmtpConfigured()) {
     console.log(`[DEV] MFA enabled email would be sent to ${email}`);
     return { sent: true };
@@ -353,9 +366,10 @@ export async function sendMfaEnabledEmail(
       firstName: firstName || 'there',
       method: method || 'totp',
       enabledAt: new Date(),
+      appUrl: baseUrl,
     }),
     headers: {
-      'List-Unsubscribe': '<https://app.getzygo.com/settings/notifications>',
+      'List-Unsubscribe': `<${baseUrl}/settings/notifications>`,
     },
   });
 }
@@ -366,8 +380,10 @@ export async function sendMfaEnabledEmail(
 export async function sendMfaDisabledEmail(
   email: string,
   firstName?: string,
-  details?: { ipAddress?: string; deviceInfo?: string }
+  details?: { ipAddress?: string; deviceInfo?: string; appUrl?: string }
 ): Promise<SendEmailResult> {
+  const baseUrl = details?.appUrl || 'https://app.getzygo.com';
+
   if (!isSmtpConfigured()) {
     console.log(`[DEV] MFA disabled email would be sent to ${email}`);
     return { sent: true };
@@ -381,6 +397,7 @@ export async function sendMfaDisabledEmail(
       disabledAt: new Date(),
       ipAddress: details?.ipAddress,
       deviceInfo: details?.deviceInfo,
+      appUrl: baseUrl,
     }),
   });
 }
@@ -397,8 +414,11 @@ export async function sendSessionRevokedEmail(
     revokedLocation?: string;
     revokedBy?: 'user' | 'admin' | 'system';
     revokerDevice?: string;
+    appUrl?: string;
   }
 ): Promise<SendEmailResult> {
+  const baseUrl = details.appUrl || 'https://app.getzygo.com';
+
   if (!isSmtpConfigured()) {
     console.log(`[DEV] Session revoked email would be sent to ${email}:`, details);
     return { sent: true };
@@ -415,9 +435,10 @@ export async function sendSessionRevokedEmail(
       revokedAt: new Date(),
       revokedBy: details.revokedBy || 'user',
       revokerDevice: details.revokerDevice,
+      appUrl: baseUrl,
     }),
     headers: {
-      'List-Unsubscribe': '<https://app.getzygo.com/settings/notifications>',
+      'List-Unsubscribe': `<${baseUrl}/settings/notifications>`,
     },
   });
 }
@@ -428,8 +449,10 @@ export async function sendSessionRevokedEmail(
 export async function sendBackupCodesRegeneratedEmail(
   email: string,
   firstName?: string,
-  details?: { ipAddress?: string; deviceInfo?: string }
+  details?: { ipAddress?: string; deviceInfo?: string; appUrl?: string }
 ): Promise<SendEmailResult> {
+  const baseUrl = details?.appUrl || 'https://app.getzygo.com';
+
   if (!isSmtpConfigured()) {
     console.log(`[DEV] Backup codes regenerated email would be sent to ${email}`);
     return { sent: true };
@@ -443,9 +466,10 @@ export async function sendBackupCodesRegeneratedEmail(
       regeneratedAt: new Date(),
       ipAddress: details?.ipAddress,
       deviceInfo: details?.deviceInfo,
+      appUrl: baseUrl,
     }),
     headers: {
-      'List-Unsubscribe': '<https://app.getzygo.com/settings/notifications>',
+      'List-Unsubscribe': `<${baseUrl}/settings/notifications>`,
     },
   });
 }
