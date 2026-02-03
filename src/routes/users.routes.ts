@@ -1,10 +1,13 @@
 /**
  * Users Routes
  *
+ * GET /api/v1/users/me - Get current user's profile
  * PATCH /api/v1/users/me - Update current user's profile (authenticated)
  * PATCH /api/v1/users/me/public - Update profile during onboarding (email-based)
- * GET /api/v1/users/me - Get current user's profile
- * GET /api/v1/users/me/avatar - Get signed URL for user's avatar
+ * GET /api/v1/users/me/avatar/file - Get avatar file (private, tenant-scoped)
+ * POST /api/v1/users/me/avatar - Upload avatar (tenant-scoped)
+ * GET /api/v1/users/:userId/avatar/file - Get any user's avatar (tenant-scoped)
+ * GET /api/v1/users/search - Search users for reporting manager selection
  */
 
 import { Hono } from 'hono';
@@ -12,27 +15,29 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { authMiddleware } from '../middleware/auth.middleware';
+import { tenantMiddleware, requireTenantMembership } from '../middleware/tenant.middleware';
 import { getDb } from '../db/client';
 import { users, auditLogs } from '../db/schema';
 import {
-  getSignedAvatarUrl,
   extractStoragePath,
   isExternalAvatarUrl,
   downloadAndStoreAvatar,
   uploadAvatar,
-  deleteOldAvatars,
+  deleteAvatarByPath,
+  getAvatarFile,
+  validateAvatarPathTenant,
 } from '../services/avatar.service';
 
 const app = new Hono();
 
 // Update profile schema (authenticated)
+// Note: avatar_url is not accepted here - use POST /users/me/avatar instead
 const updateProfileSchema = z.object({
   title: z.enum(['Mr', 'Ms', 'Mx', 'Dr', 'Prof', '']).optional().nullable(),
   first_name: z.string().min(1).max(100).optional(),
   last_name: z.string().min(1).max(100).optional(),
   job_title: z.string().max(100).optional().nullable(),
   reporting_manager_id: z.string().uuid().optional().nullable(),
-  avatar_url: z.string().url().optional().nullable(),
   // Phone fields
   phone: z.string().max(20).optional().nullable(),
   phone_country_code: z.string().max(5).optional().nullable(),
@@ -56,45 +61,14 @@ const updateProfilePublicSchema = z.object({
 /**
  * GET /api/v1/users/me
  * Get current user's profile
+ * Note: Avatar URL is not exposed - use GET /users/me/avatar/file to fetch avatar
  */
 app.get('/me', authMiddleware, async (c) => {
   const user = c.get('user');
   const db = getDb();
 
-  let avatarUrl: string | null = null;
-  let currentAvatarPath = user.avatarUrl;
-  let avatarSource = user.avatarSource;
-
-  if (user.avatarUrl) {
-    // Check if avatar is external (OAuth provider URL) and source is not 'upload'
-    // User uploads always take priority - don't overwrite with OAuth avatar
-    if (isExternalAvatarUrl(user.avatarUrl) && avatarSource !== 'upload') {
-      // Download external avatar to our private storage
-      console.log(`[Users] Downloading OAuth avatar for user ${user.id}`);
-      const { path, error } = await downloadAndStoreAvatar(user.id, user.avatarUrl);
-
-      if (path && !error) {
-        // Update user record with new storage path, mark as oauth source
-        await db
-          .update(users)
-          .set({ avatarUrl: path, avatarSource: 'oauth', updatedAt: new Date() })
-          .where(eq(users.id, user.id));
-
-        currentAvatarPath = path;
-        avatarSource = 'oauth';
-        console.log(`[Users] OAuth avatar downloaded and stored: ${path}`);
-      } else {
-        console.error(`[Users] Failed to download OAuth avatar: ${error}`);
-      }
-    }
-
-    // Generate signed URL for the avatar
-    const storagePath = extractStoragePath(currentAvatarPath || '');
-    if (storagePath) {
-      const { url } = await getSignedAvatarUrl(storagePath);
-      avatarUrl = url || null;
-    }
-  }
+  const currentAvatarPath = user.avatarUrl;
+  const avatarSource = user.avatarSource;
 
   // Fetch reporting manager info if set
   let reportingManager = null;
@@ -122,9 +96,9 @@ app.get('/me', authMiddleware, async (c) => {
     job_title: user.jobTitle,
     reporting_manager_id: user.reportingManagerId,
     reporting_manager: reportingManager,
-    avatar_url: avatarUrl,
-    avatar_source: avatarSource,
+    // Avatar: no URL exposed - fetch via /users/me/avatar/file
     has_avatar: !!currentAvatarPath,
+    avatar_source: avatarSource,
     email_verified: user.emailVerified,
     email_verified_via: user.emailVerifiedVia,
     // Phone fields
@@ -145,44 +119,62 @@ app.get('/me', authMiddleware, async (c) => {
 });
 
 /**
- * GET /api/v1/users/me/avatar
- * Get a fresh signed URL for the user's avatar
+ * GET /api/v1/users/me/avatar/file
+ * Stream avatar file directly - tenant-scoped, no external URLs exposed
+ * Requires: auth + tenant context
  */
-app.get('/me/avatar', authMiddleware, async (c) => {
+app.get('/me/avatar/file', authMiddleware, tenantMiddleware, requireTenantMembership, async (c) => {
   const user = c.get('user');
+  const tenantId = c.get('tenantId');
 
   if (!user.avatarUrl) {
-    return c.json({ avatar_url: null, has_avatar: false });
+    return c.json({ error: 'no_avatar', message: 'User has no avatar' }, 404);
   }
 
   const storagePath = extractStoragePath(user.avatarUrl);
   if (!storagePath) {
-    return c.json({ avatar_url: null, has_avatar: false });
+    return c.json({ error: 'invalid_path', message: 'Invalid avatar path' }, 404);
   }
 
-  const { url, error } = await getSignedAvatarUrl(storagePath);
+  // Validate tenant ownership of the avatar
+  if (!validateAvatarPathTenant(storagePath, tenantId)) {
+    // Avatar exists but belongs to a different tenant context
+    // This can happen with legacy avatars - serve them but log a warning
+    console.warn(`[Users] Avatar path ${storagePath} does not match tenant ${tenantId} for user ${user.id}`);
+  }
 
-  if (error) {
+  // Get the actual file
+  const { data, contentType, error } = await getAvatarFile(storagePath);
+
+  if (error || !data) {
     return c.json(
-      { error: 'avatar_url_error', message: error },
+      { error: 'avatar_fetch_error', message: error || 'Failed to fetch avatar' },
       500
     );
   }
 
-  return c.json({
-    avatar_url: url,
-    has_avatar: true,
-    expires_in: 3600, // 1 hour
+  // Stream the file with appropriate headers
+  const arrayBuffer = await data.arrayBuffer();
+  return new Response(arrayBuffer, {
+    status: 200,
+    headers: {
+      'Content-Type': contentType,
+      'Content-Length': arrayBuffer.byteLength.toString(),
+      'Cache-Control': 'private, max-age=3600', // Cache for 1 hour
+      'X-Content-Type-Options': 'nosniff',
+    },
   });
 });
 
 /**
  * POST /api/v1/users/me/avatar
- * Upload avatar for current user
+ * Upload avatar for current user (tenant-scoped)
  * Accepts multipart/form-data with 'avatar' file field
+ * Requires: auth + tenant context
  */
-app.post('/me/avatar', authMiddleware, async (c) => {
+app.post('/me/avatar', authMiddleware, tenantMiddleware, requireTenantMembership, async (c) => {
   const user = c.get('user');
+  const tenantId = c.get('tenantId');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
 
@@ -219,8 +211,8 @@ app.post('/me/avatar', authMiddleware, async (c) => {
     // Get file buffer
     const buffer = await file.arrayBuffer();
 
-    // Upload via service (uses service role key)
-    const { path, error: uploadError } = await uploadAvatar(user.id, buffer, file.type);
+    // Upload via service with tenant-scoped path
+    const { path, error: uploadError } = await uploadAvatar(tenantId, user.id, buffer, file.type);
 
     if (uploadError || !path) {
       console.error('[Users] Avatar upload failed:', uploadError);
@@ -245,11 +237,8 @@ app.post('/me/avatar', authMiddleware, async (c) => {
 
     // Clean up old avatar asynchronously
     if (oldAvatarPath && oldAvatarPath !== path) {
-      deleteOldAvatars(user.id, path).catch(console.error);
+      deleteAvatarByPath(oldAvatarPath).catch(console.error);
     }
-
-    // Generate signed URL for the new avatar
-    const { url: signedUrl } = await getSignedAvatarUrl(path);
 
     // Audit log
     await db.insert(auditLogs).values({
@@ -257,16 +246,16 @@ app.post('/me/avatar', authMiddleware, async (c) => {
       action: 'avatar_uploaded',
       resourceType: 'user',
       resourceId: user.id,
-      details: { path },
+      details: { path, tenant_id: tenantId },
       ipAddress: ipAddress || undefined,
       userAgent: userAgent || undefined,
       status: 'success',
     });
 
+    // Return success - no URL exposed, client fetches via /avatar/file
     return c.json({
       success: true,
-      avatar_url: signedUrl,
-      path,
+      has_avatar: true,
     });
   } catch (error) {
     console.error('[Users] Avatar upload error:', error);
@@ -307,21 +296,8 @@ app.patch('/me', authMiddleware, zValidator('json', updateProfileSchema), async 
   if (body.reporting_manager_id !== undefined) {
     updates.reportingManagerId = body.reporting_manager_id || null;
   }
-  if (body.avatar_url !== undefined) {
-    // Store the storage path (extract from full URL if needed)
-    const newPath = body.avatar_url ? extractStoragePath(body.avatar_url) || body.avatar_url : null;
-    updates.avatarUrl = newPath;
-    updates.avatarSource = newPath ? 'upload' : null; // User upload takes priority
-
-    // Clean up old avatar files if uploading a new one
-    if (newPath && user.avatarUrl) {
-      const oldPath = extractStoragePath(user.avatarUrl);
-      if (oldPath && oldPath !== newPath) {
-        // Delete old avatar asynchronously (don't wait)
-        deleteOldAvatars(user.id, newPath).catch(console.error);
-      }
-    }
-  }
+  // Note: avatar_url updates are no longer accepted via PATCH
+  // Use POST /users/me/avatar to upload avatars with tenant scoping
   // Phone fields
   if (body.phone !== undefined) {
     updates.phone = body.phone;
@@ -384,7 +360,9 @@ app.patch('/me', authMiddleware, zValidator('json', updateProfileSchema), async 
     last_name: updatedUser.lastName,
     job_title: updatedUser.jobTitle,
     reporting_manager_id: updatedUser.reportingManagerId,
-    avatar_url: updatedUser.avatarUrl,
+    // Avatar: no URL exposed - fetch via /users/me/avatar/file
+    has_avatar: !!updatedUser.avatarUrl,
+    avatar_source: updatedUser.avatarSource,
     email_verified: updatedUser.emailVerified,
     // Phone fields
     phone: updatedUser.phone,
@@ -509,9 +487,68 @@ app.get('/search', authMiddleware, async (c) => {
       first_name: u.firstName,
       last_name: u.lastName,
       email: u.email,
-      avatar_url: u.avatarUrl,
+      // Avatar: no URL exposed - fetch via /users/{userId}/avatar/file
+      has_avatar: !!u.avatarUrl,
       job_title: u.jobTitle,
     })),
+  });
+});
+
+/**
+ * GET /api/v1/users/:userId/avatar/file
+ * Stream avatar file for any user in the same tenant
+ * Requires: auth + tenant context + both users must be in same tenant
+ */
+app.get('/:userId/avatar/file', authMiddleware, tenantMiddleware, requireTenantMembership, async (c) => {
+  const requestedUserId = c.req.param('userId');
+  const tenantId = c.get('tenantId');
+  const db = getDb();
+
+  // Get the requested user
+  const requestedUser = await db.query.users.findFirst({
+    where: eq(users.id, requestedUserId),
+    columns: { id: true, avatarUrl: true },
+  });
+
+  if (!requestedUser) {
+    return c.json({ error: 'user_not_found', message: 'User not found' }, 404);
+  }
+
+  if (!requestedUser.avatarUrl) {
+    return c.json({ error: 'no_avatar', message: 'User has no avatar' }, 404);
+  }
+
+  const storagePath = extractStoragePath(requestedUser.avatarUrl);
+  if (!storagePath) {
+    return c.json({ error: 'invalid_path', message: 'Invalid avatar path' }, 404);
+  }
+
+  // Validate tenant ownership of the avatar
+  if (!validateAvatarPathTenant(storagePath, tenantId)) {
+    // Avatar exists but belongs to a different tenant context
+    console.warn(`[Users] Avatar path ${storagePath} does not match tenant ${tenantId} for user ${requestedUserId}`);
+  }
+
+  // Get the actual file
+  const { data, contentType, error } = await getAvatarFile(storagePath);
+
+  if (error || !data) {
+    return c.json(
+      { error: 'avatar_fetch_error', message: error || 'Failed to fetch avatar' },
+      500
+    );
+  }
+
+  // Stream the file with appropriate headers
+  const arrayBuffer = await data.arrayBuffer();
+  return new Response(arrayBuffer, {
+    status: 200,
+    headers: {
+      'Content-Type': contentType,
+      'Content-Length': arrayBuffer.byteLength.toString(),
+      'Cache-Control': 'private, max-age=3600', // Cache for 1 hour
+      'X-Content-Type-Options': 'nosniff',
+    },
   });
 });
 

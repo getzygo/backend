@@ -106,7 +106,9 @@ const profileHandler = async (c: any) => {
       first_name: user.firstName,
       last_name: user.lastName,
       display_name: user.displayName,
-      avatar_url: user.avatarUrl,
+      // Avatar: no URL exposed - fetch via /users/me/avatar/file
+      has_avatar: !!user.avatarUrl,
+      avatar_source: user.avatarSource,
       phone: user.phone,
       email_verified: user.emailVerified,
       email_verified_via: user.emailVerifiedVia, // 'email', 'google', 'github', or null

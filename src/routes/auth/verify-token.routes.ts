@@ -102,6 +102,7 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
   });
 
   // Return verified user, tenant, role, permissions, session, and tenant memberships
+  // Note: avatarUrl is not exposed - frontend fetches via /users/me/avatar/file
   return c.json({
     verified: true,
     user: {
@@ -109,7 +110,8 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
       email: payload.email,
       firstName: payload.firstName,
       lastName: payload.lastName,
-      avatarUrl: payload.avatarUrl,
+      hasAvatar: !!payload.avatarUrl,
+      avatarSource: payload.avatarSource || null,
       emailVerified: payload.emailVerified,
       emailVerifiedVia: payload.emailVerifiedVia,
     },

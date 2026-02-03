@@ -1,16 +1,17 @@
 /**
  * Avatar Service
  *
- * Handles avatar storage operations:
- * - Downloading external avatars (OAuth) to private storage
- * - Generating signed URLs for private avatars
+ * Handles avatar storage operations with tenant isolation and obfuscated filenames:
+ * - All avatars stored with random UUIDs: {tenantId}/{random-uuid}.{ext}
+ * - Filenames are unpredictable - can't guess paths even with Supabase access
+ * - No signed URLs exposed - avatars served only via authenticated API endpoint
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { randomUUID } from 'crypto';
 import { getEnv } from '../config/env';
 
 const BUCKET_NAME = 'avatars';
-const SIGNED_URL_EXPIRY = 604800; // 7 days in seconds
 
 /**
  * Get Supabase client with service role for storage operations
@@ -38,8 +39,10 @@ export function isExternalAvatarUrl(url: string | null | undefined): boolean {
 /**
  * Download an external avatar and store it in our private storage
  * Returns the storage path (not a public URL)
+ * Storage path: {tenantId}/{random-uuid}.{ext} (obfuscated - can't guess)
  */
 export async function downloadAndStoreAvatar(
+  tenantId: string,
   userId: string,
   externalUrl: string
 ): Promise<{ path: string; error?: string }> {
@@ -64,8 +67,10 @@ export async function downloadAndStoreAvatar(
     else if (contentType.includes('gif')) extension = 'gif';
     else if (contentType.includes('webp')) extension = 'webp';
 
-    // Generate storage path
-    const fileName = `${userId}/avatar-${Date.now()}.${extension}`;
+    // Generate obfuscated storage path with random UUID
+    // Format: {tenantId}/{random-uuid}.{ext}
+    // This is unpredictable - can't guess the path from userId
+    const fileName = `${tenantId}/${randomUUID()}.${extension}`;
 
     // Upload to Supabase Storage
     const supabase = getStorageClient();
@@ -73,7 +78,7 @@ export async function downloadAndStoreAvatar(
       .from(BUCKET_NAME)
       .upload(fileName, buffer, {
         contentType,
-        upsert: true,
+        upsert: false, // Don't upsert - always create new
       });
 
     if (error) {
@@ -81,6 +86,7 @@ export async function downloadAndStoreAvatar(
       return { path: '', error: error.message };
     }
 
+    console.log(`[AvatarService] Avatar stored with obfuscated path for user ${userId}`);
     return { path: data.path };
   } catch (error) {
     console.error('[AvatarService] Error downloading avatar:', error);
@@ -92,50 +98,9 @@ export async function downloadAndStoreAvatar(
 }
 
 /**
- * Generate a signed URL for a private avatar
- * @param storagePath - The path in storage (e.g., "user-id/avatar-123.jpg")
- * @param expiresIn - Expiry time in seconds (default 1 hour)
- */
-export async function getSignedAvatarUrl(
-  storagePath: string,
-  expiresIn: number = SIGNED_URL_EXPIRY
-): Promise<{ url: string; error?: string }> {
-  try {
-    const env = getEnv();
-    const supabase = getStorageClient();
-
-    const { data, error } = await supabase.storage
-      .from(BUCKET_NAME)
-      .createSignedUrl(storagePath, expiresIn);
-
-    if (error) {
-      console.error('[AvatarService] Signed URL error:', error);
-      return { url: '', error: error.message };
-    }
-
-    // Replace internal Supabase URL with external URL for frontend access
-    // Internal: http://localhost:8000 or http://kong:8000
-    // External: https://db.zygo.tech
-    let signedUrl = data.signedUrl;
-    const externalUrl = env.SUPABASE_EXTERNAL_URL || 'https://db.zygo.tech';
-    signedUrl = signedUrl.replace(/http:\/\/localhost:8000/g, externalUrl);
-    signedUrl = signedUrl.replace(/http:\/\/kong:8000/g, externalUrl);
-    signedUrl = signedUrl.replace(/http:\/\/127\.0\.0\.1:8000/g, externalUrl);
-
-    return { url: signedUrl };
-  } catch (error) {
-    console.error('[AvatarService] Error creating signed URL:', error);
-    return {
-      url: '',
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
-  }
-}
-
-/**
- * Extract storage path from a Supabase storage URL
- * e.g., "https://db.zygo.tech/storage/v1/object/public/avatars/user-id/avatar.jpg"
- * -> "user-id/avatar.jpg"
+ * Extract storage path from a Supabase storage URL or return path as-is
+ * e.g., "https://db.zygo.tech/storage/v1/object/public/avatars/tenant-id/abc123.jpg"
+ * -> "tenant-id/abc123.jpg"
  */
 export function extractStoragePath(url: string): string | null {
   if (!url) return null;
@@ -157,8 +122,10 @@ export function extractStoragePath(url: string): string | null {
 /**
  * Upload avatar directly from buffer/file
  * Uses service role to bypass RLS
+ * Storage path: {tenantId}/{random-uuid}.{ext} (obfuscated - can't guess)
  */
 export async function uploadAvatar(
+  tenantId: string,
   userId: string,
   buffer: ArrayBuffer | Buffer,
   contentType: string = 'image/jpeg'
@@ -170,8 +137,10 @@ export async function uploadAvatar(
     else if (contentType.includes('gif')) extension = 'gif';
     else if (contentType.includes('webp')) extension = 'webp';
 
-    // Generate storage path
-    const fileName = `${userId}/avatar-${Date.now()}.${extension}`;
+    // Generate obfuscated storage path with random UUID
+    // Format: {tenantId}/{random-uuid}.{ext}
+    // This is unpredictable - can't guess the path from userId
+    const fileName = `${tenantId}/${randomUUID()}.${extension}`;
 
     // Upload to Supabase Storage using service role
     const supabase = getStorageClient();
@@ -179,7 +148,7 @@ export async function uploadAvatar(
       .from(BUCKET_NAME)
       .upload(fileName, buffer, {
         contentType,
-        upsert: true,
+        upsert: false, // Don't upsert - always create new with unique UUID
       });
 
     if (error) {
@@ -187,6 +156,7 @@ export async function uploadAvatar(
       return { path: '', error: error.message };
     }
 
+    console.log(`[AvatarService] Avatar uploaded with obfuscated path for user ${userId}`);
     return { path: data.path };
   } catch (error) {
     console.error('[AvatarService] Error uploading avatar:', error);
@@ -198,49 +168,76 @@ export async function uploadAvatar(
 }
 
 /**
- * Delete old avatars for a user (cleanup)
+ * Delete an avatar file by its path
  */
-export async function deleteOldAvatars(
-  userId: string,
-  keepPath?: string
-): Promise<void> {
+export async function deleteAvatarByPath(path: string): Promise<void> {
+  if (!path) return;
+
+  try {
+    const supabase = getStorageClient();
+    const { error } = await supabase.storage
+      .from(BUCKET_NAME)
+      .remove([path]);
+
+    if (error) {
+      console.error('[AvatarService] Error deleting avatar:', error);
+    }
+  } catch (error) {
+    console.error('[AvatarService] Error in delete:', error);
+  }
+}
+
+/**
+ * Get avatar file as binary data for streaming
+ * This is used by the private avatar endpoint to serve files without exposing signed URLs
+ */
+export async function getAvatarFile(
+  storagePath: string
+): Promise<{ data: Blob | null; contentType: string; error?: string }> {
   try {
     const supabase = getStorageClient();
 
-    // List all files in user's folder
-    const { data: files, error: listError } = await supabase.storage
+    const { data, error } = await supabase.storage
       .from(BUCKET_NAME)
-      .list(userId);
+      .download(storagePath);
 
-    if (listError || !files) {
-      console.error('[AvatarService] Error listing files:', listError);
-      return;
+    if (error) {
+      console.error('[AvatarService] Download error:', error);
+      return { data: null, contentType: '', error: error.message };
     }
 
-    // Filter out the file to keep
-    const filesToDelete = files
-      .filter((f) => !keepPath || `${userId}/${f.name}` !== keepPath)
-      .map((f) => `${userId}/${f.name}`);
+    // Determine content type from path
+    let contentType = 'image/jpeg';
+    if (storagePath.endsWith('.png')) contentType = 'image/png';
+    else if (storagePath.endsWith('.gif')) contentType = 'image/gif';
+    else if (storagePath.endsWith('.webp')) contentType = 'image/webp';
 
-    if (filesToDelete.length > 0) {
-      const { error: deleteError } = await supabase.storage
-        .from(BUCKET_NAME)
-        .remove(filesToDelete);
-
-      if (deleteError) {
-        console.error('[AvatarService] Error deleting old files:', deleteError);
-      }
-    }
+    return { data, contentType };
   } catch (error) {
-    console.error('[AvatarService] Error in cleanup:', error);
+    console.error('[AvatarService] Error getting avatar file:', error);
+    return {
+      data: null,
+      contentType: '',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    };
   }
+}
+
+/**
+ * Validate that a storage path belongs to a specific tenant
+ * Path format: {tenantId}/{random-uuid}.{ext}
+ */
+export function validateAvatarPathTenant(storagePath: string, tenantId: string): boolean {
+  if (!storagePath || !tenantId) return false;
+  return storagePath.startsWith(`${tenantId}/`);
 }
 
 export const avatarService = {
   isExternalAvatarUrl,
   downloadAndStoreAvatar,
   uploadAvatar,
-  getSignedAvatarUrl,
   extractStoragePath,
-  deleteOldAvatars,
+  deleteAvatarByPath,
+  getAvatarFile,
+  validateAvatarPathTenant,
 };

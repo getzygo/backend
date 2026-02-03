@@ -90,7 +90,8 @@ app.get('/:tenantId/members', async (c) => {
         email: m.user.email,
         first_name: m.user.firstName,
         last_name: m.user.lastName,
-        avatar_url: m.user.avatarUrl,
+        // Avatar: no URL exposed - fetch via /users/{userId}/avatar/file
+        has_avatar: !!m.user.avatarUrl,
       },
       role: {
         id: m.role.id,
