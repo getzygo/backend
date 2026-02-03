@@ -9,7 +9,7 @@ import crypto from 'crypto';
 import { eq, and, isNull, gt, lt } from 'drizzle-orm';
 import { getDb } from '../db/client';
 import { magicLinks, users, auditLogs } from '../db/schema';
-import { sendEmail } from './email.service';
+import { sendMagicLinkEmail } from './email.service';
 import type { MagicLink } from '../db/schema/security';
 
 // Magic link expiration in minutes
@@ -102,34 +102,22 @@ export async function createMagicLink(options: CreateMagicLinkOptions): Promise<
     options.redirectUrl ? `&redirect=${encodeURIComponent(options.redirectUrl)}` : ''
   }`;
 
-  // Send email
+  // Send email using the template
   try {
-    await sendEmail({
-      to: normalizedEmail,
-      subject: 'Sign in to Zygo',
-      html: `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto;">
-          <h1 style="color: #1a1a2e; font-size: 24px; margin-bottom: 24px;">Sign in to Zygo</h1>
-          <p style="color: #4a4a4a; font-size: 16px; line-height: 1.5; margin-bottom: 24px;">
-            Click the button below to sign in to your Zygo account. This link will expire in ${MAGIC_LINK_EXPIRY_MINUTES} minutes.
-          </p>
-          <a href="${magicLinkUrl}"
-             style="display: inline-block; background: #6366f1; color: white; padding: 12px 24px;
-                    text-decoration: none; border-radius: 8px; font-weight: 500; font-size: 16px;">
-            Sign in to Zygo
-          </a>
-          <p style="color: #888; font-size: 14px; margin-top: 24px; line-height: 1.5;">
-            If you didn't request this link, you can safely ignore this email.
-          </p>
-          <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
-          <p style="color: #888; font-size: 12px;">
-            Or copy and paste this link into your browser:<br>
-            <a href="${magicLinkUrl}" style="color: #6366f1; word-break: break-all;">${magicLinkUrl}</a>
-          </p>
-        </div>
-      `,
-      text: `Sign in to Zygo\n\nClick the link below to sign in to your Zygo account. This link will expire in ${MAGIC_LINK_EXPIRY_MINUTES} minutes.\n\n${magicLinkUrl}\n\nIf you didn't request this link, you can safely ignore this email.`,
-    });
+    const result = await sendMagicLinkEmail(
+      normalizedEmail,
+      user.firstName,
+      magicLinkUrl,
+      MAGIC_LINK_EXPIRY_MINUTES
+    );
+
+    if (!result.sent) {
+      console.error('[MagicLink] Failed to send email:', result.error);
+      return {
+        success: false,
+        error: 'email_failed',
+      };
+    }
   } catch (error) {
     console.error('[MagicLink] Failed to send email:', error);
     return {

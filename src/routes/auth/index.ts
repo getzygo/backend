@@ -18,8 +18,7 @@ import changePasswordRoutes from './change-password.routes';
 import verifyTokenRoutes from './verify-token.routes';
 import sessionsRoutes from './sessions.routes';
 import trustedDevicesRoutes from './trusted-devices.routes';
-// TODO: Fix magic-link routes to use correct auth token service signature
-// import magicLinkRoutes from './magic-link.routes';
+import magicLinkRoutes from './magic-link.routes';
 import webauthnRoutes from './webauthn.routes';
 import passwordSecurityRoutes from './password-security.routes';
 
@@ -105,11 +104,10 @@ app.route('/sessions', sessionsRoutes);
 // DELETE /api/v1/auth/mfa/trusted-devices
 app.route('/mfa', trustedDevicesRoutes);
 
-// TODO: Enable after fixing auth token service signature compatibility
 // Magic link routes
 // POST /api/v1/auth/magic-link/send
 // POST /api/v1/auth/magic-link/verify
-// app.route('/magic-link', magicLinkRoutes);
+app.route('/magic-link', magicLinkRoutes);
 
 // WebAuthn/Passkeys routes
 // POST /api/v1/auth/webauthn/register/options

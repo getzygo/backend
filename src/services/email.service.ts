@@ -25,6 +25,11 @@ import { BackupCodesRegenerated } from '../emails/templates/backup-codes-regener
 import { MfaReminder } from '../emails/templates/mfa-reminder';
 import { PhoneReminder } from '../emails/templates/phone-reminder';
 import { TrialReminder } from '../emails/templates/trial-reminder';
+import { BillingEmailChanged } from '../emails/templates/billing-email-changed';
+import { PrimaryContactChanged } from '../emails/templates/primary-contact-changed';
+import { TenantDeletionRequested } from '../emails/templates/tenant-deletion-requested';
+import { TenantDeletionCancelled } from '../emails/templates/tenant-deletion-cancelled';
+import { MagicLink } from '../emails/templates/magic-link';
 
 // Types
 interface SendEmailOptions {
@@ -593,6 +598,177 @@ export async function sendTrialReminderEmail(
   });
 }
 
+/**
+ * Send billing email changed notification (ALWAYS_SEND - cannot be disabled)
+ */
+export async function sendBillingEmailChangedEmail(
+  email: string,
+  options: {
+    tenantName?: string;
+    newEmail?: string;
+    changedBy?: string;
+    isNewAddress?: boolean;
+    appUrl?: string;
+  }
+): Promise<SendEmailResult> {
+  const baseUrl = options.appUrl || 'https://app.getzygo.com';
+
+  if (!isSmtpConfigured()) {
+    logger.dev(` Billing email changed notification would be sent to ${email}:`, options);
+    return { sent: true };
+  }
+
+  const subject = options.isNewAddress
+    ? 'You are now the billing contact - Zygo'
+    : 'Billing email changed - Zygo';
+
+  return sendEmail({
+    to: email,
+    subject,
+    template: BillingEmailChanged({
+      tenantName: options.tenantName,
+      newEmail: options.newEmail,
+      changedBy: options.changedBy,
+      isNewAddress: options.isNewAddress,
+      appUrl: baseUrl,
+    }),
+  });
+}
+
+/**
+ * Send primary contact changed notification (ALWAYS_SEND - cannot be disabled)
+ */
+export async function sendPrimaryContactChangedEmail(
+  email: string,
+  options: {
+    contactName?: string;
+    action?: 'added' | 'updated' | 'removed';
+    changedBy?: string;
+    newEmail?: string;
+    isNewAddress?: boolean;
+    appUrl?: string;
+  }
+): Promise<SendEmailResult> {
+  const baseUrl = options.appUrl || 'https://app.getzygo.com';
+
+  if (!isSmtpConfigured()) {
+    logger.dev(` Primary contact changed notification would be sent to ${email}:`, options);
+    return { sent: true };
+  }
+
+  let subject: string;
+  if (options.isNewAddress) {
+    subject = 'You are now the primary contact - Zygo';
+  } else if (options.action === 'removed') {
+    subject = 'Primary contact removed - Zygo';
+  } else if (options.action === 'added') {
+    subject = 'Primary contact added - Zygo';
+  } else {
+    subject = 'Primary contact updated - Zygo';
+  }
+
+  return sendEmail({
+    to: email,
+    subject,
+    template: PrimaryContactChanged({
+      contactName: options.contactName,
+      action: options.action,
+      changedBy: options.changedBy,
+      newEmail: options.newEmail,
+      isNewAddress: options.isNewAddress,
+      appUrl: baseUrl,
+    }),
+  });
+}
+
+/**
+ * Send tenant deletion requested notification (ALWAYS_SEND - cannot be disabled)
+ */
+export async function sendTenantDeletionRequestedEmail(
+  email: string,
+  options: {
+    firstName?: string;
+    tenantName?: string;
+    deletionScheduledAt: Date;
+    cancelableUntil: Date;
+    requestedBy?: string;
+    reason?: string;
+    appUrl?: string;
+  }
+): Promise<SendEmailResult> {
+  const baseUrl = options.appUrl || 'https://app.getzygo.com';
+
+  if (!isSmtpConfigured()) {
+    logger.dev(` Tenant deletion requested notification would be sent to ${email}:`, options);
+    return { sent: true };
+  }
+
+  return sendEmail({
+    to: email,
+    subject: `Workspace deletion scheduled - ${options.tenantName || 'Zygo'}`,
+    template: TenantDeletionRequested({
+      firstName: options.firstName,
+      tenantName: options.tenantName,
+      deletionScheduledAt: options.deletionScheduledAt,
+      cancelableUntil: options.cancelableUntil,
+      requestedBy: options.requestedBy,
+      reason: options.reason,
+      appUrl: baseUrl,
+    }),
+  });
+}
+
+/**
+ * Send tenant deletion cancelled notification (ALWAYS_SEND - cannot be disabled)
+ */
+export async function sendTenantDeletionCancelledEmail(
+  email: string,
+  options: {
+    firstName?: string;
+    tenantName?: string;
+    cancelledBy?: string;
+    appUrl?: string;
+  }
+): Promise<SendEmailResult> {
+  const baseUrl = options.appUrl || 'https://app.getzygo.com';
+
+  if (!isSmtpConfigured()) {
+    logger.dev(` Tenant deletion cancelled notification would be sent to ${email}:`, options);
+    return { sent: true };
+  }
+
+  return sendEmail({
+    to: email,
+    subject: `Workspace deletion cancelled - ${options.tenantName || 'Zygo'}`,
+    template: TenantDeletionCancelled({
+      firstName: options.firstName,
+      tenantName: options.tenantName,
+      cancelledBy: options.cancelledBy,
+      appUrl: baseUrl,
+    }),
+  });
+}
+
+/**
+ * Send magic link email for passwordless sign-in
+ */
+export async function sendMagicLinkEmail(
+  to: string,
+  firstName: string | null,
+  magicLinkUrl: string,
+  expiresInMinutes: number = 15
+): Promise<SendEmailResult> {
+  return sendEmail({
+    to,
+    subject: 'Sign in to Zygo',
+    template: MagicLink({
+      firstName: firstName || 'there',
+      magicLinkUrl,
+      expiresInMinutes,
+    }),
+  });
+}
+
 // Export the service object for backwards compatibility
 export const emailService = {
   sendVerificationEmail,
@@ -610,4 +786,9 @@ export const emailService = {
   sendMfaReminderEmail,
   sendPhoneReminderEmail,
   sendTrialReminderEmail,
+  sendBillingEmailChangedEmail,
+  sendPrimaryContactChangedEmail,
+  sendTenantDeletionRequestedEmail,
+  sendTenantDeletionCancelledEmail,
+  sendMagicLinkEmail,
 };

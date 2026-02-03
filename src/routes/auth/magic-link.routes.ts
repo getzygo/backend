@@ -8,12 +8,12 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, auditLogs } from '../../db/schema';
+import { users, auditLogs, tenantMembers, tenants, roles } from '../../db/schema';
 import { createMagicLink, verifyMagicLink } from '../../services/magic-link.service';
 import { getSupabaseAdmin } from '../../services/supabase.service';
-import { createAuthToken } from '../../services/auth-token.service';
+import { createAuthToken, type TenantMembership } from '../../services/auth-token.service';
 
 const app = new Hono();
 
@@ -115,15 +115,50 @@ app.post('/verify', zValidator('json', verifySchema), async (c) => {
     );
   }
 
-  // Create Supabase session
+  // Get user's tenant memberships with role info
+  const memberships = await db
+    .select({
+      tenantId: tenantMembers.tenantId,
+      isOwner: tenantMembers.isOwner,
+      tenantName: tenants.name,
+      tenantSlug: tenants.slug,
+      tenantPlan: tenants.plan,
+      roleId: roles.id,
+      roleName: roles.name,
+      roleSlug: roles.slug,
+    })
+    .from(tenantMembers)
+    .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
+    .innerJoin(roles, eq(tenantMembers.roleId, roles.id))
+    .where(
+      and(
+        eq(tenantMembers.userId, user.id),
+        eq(tenantMembers.status, 'active')
+      )
+    );
+
+  if (memberships.length === 0) {
+    return c.json(
+      {
+        error: 'no_workspace',
+        message: 'You are not a member of any workspace.',
+      },
+      403
+    );
+  }
+
+  // Create Supabase session using signInWithPassword (magic link creates a session)
   const supabase = getSupabaseAdmin();
-  const { data: authData, error: authError } = await supabase.auth.admin.generateLink({
+
+  // For magic link, we need to create a session directly
+  // Use admin API to sign in the user
+  const { data: sessionData, error: sessionError } = await supabase.auth.admin.generateLink({
     type: 'magiclink',
     email: user.email,
   });
 
-  if (authError) {
-    console.error('[MagicLink] Failed to generate session:', authError);
+  if (sessionError || !sessionData) {
+    console.error('[MagicLink] Failed to generate session:', sessionError);
     return c.json(
       {
         error: 'session_failed',
@@ -133,12 +168,58 @@ app.post('/verify', zValidator('json', verifySchema), async (c) => {
     );
   }
 
+  // Extract tokens from the hashed_token response
+  // Note: generateLink returns a link, not tokens directly
+  // We need to use a different approach - create a custom session
+  const { data: userData, error: userError } = await supabase.auth.admin.getUserById(
+    user.supabaseUserId || ''
+  );
+
+  if (userError || !userData.user) {
+    console.error('[MagicLink] Failed to get Supabase user:', userError);
+    return c.json(
+      {
+        error: 'session_failed',
+        message: 'Failed to create session.',
+      },
+      500
+    );
+  }
+
+  // Use the first tenant as default, or check redirect_url for tenant slug
+  const targetMembership = memberships[0];
+
+  // Build tenant memberships for switcher UI
+  const tenantMemberships: TenantMembership[] = memberships.map((m) => ({
+    id: m.tenantId,
+    name: m.tenantName,
+    slug: m.tenantSlug,
+    plan: m.tenantPlan || 'free',
+    role: {
+      id: m.roleId,
+      name: m.roleName,
+    },
+    isOwner: m.isOwner,
+  }));
+
   // Generate opaque auth token for cross-domain redirect
-  const authToken = await generateAuthToken(user.id, {
-    access_token: authData.properties?.access_token || '',
-    refresh_token: authData.properties?.refresh_token || '',
-    expires_in: 3600,
-    token_type: 'bearer',
+  const authToken = await createAuthToken({
+    userId: user.id,
+    tenantId: targetMembership.tenantId,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    avatarUrl: user.avatarUrl || undefined,
+    avatarSource: user.avatarSource || undefined,
+    emailVerified: user.emailVerified,
+    emailVerifiedVia: user.emailVerifiedVia,
+    roleId: targetMembership.roleId,
+    roleName: targetMembership.roleName,
+    roleSlug: targetMembership.roleSlug,
+    isOwner: targetMembership.isOwner,
+    // Note: Magic link doesn't provide Supabase tokens directly
+    // The frontend will need to establish a session separately
+    tenantMemberships,
   });
 
   // Update last login
@@ -162,10 +243,13 @@ app.post('/verify', zValidator('json', verifySchema), async (c) => {
     status: 'success',
   });
 
+  // Build redirect URL
+  const redirectUrl = result.redirectUrl || `https://${targetMembership.tenantSlug}.zygo.tech?auth_token=${authToken}`;
+
   return c.json({
     success: true,
     auth_token: authToken,
-    redirect_url: result.redirectUrl,
+    redirect_url: redirectUrl,
     user: {
       id: user.id,
       email: user.email,
@@ -174,6 +258,13 @@ app.post('/verify', zValidator('json', verifySchema), async (c) => {
       email_verified: user.emailVerified,
       mfa_enabled: user.mfaEnabled,
     },
+    tenant: {
+      id: targetMembership.tenantId,
+      name: targetMembership.tenantName,
+      slug: targetMembership.tenantSlug,
+    },
+    requires_workspace_selection: memberships.length > 1,
+    workspaces: memberships.length > 1 ? tenantMemberships : undefined,
   });
 });
 
