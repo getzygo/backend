@@ -10,7 +10,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { signInWithPassword } from '../../services/supabase.service';
-import { getUserByEmail, verifyPassword } from '../../services/user.service';
+import { getUserByEmail, verifyPassword, needsHashUpgrade, hashPassword, upgradePasswordHash } from '../../services/user.service';
 import { getUserTenants, getTenantBySlug, isTenantMember, getTenantMembershipWithRole } from '../../services/tenant.service';
 import { checkVerificationStatus } from '../../services/verification.service';
 import { mfaService } from '../../services/mfa.service';
@@ -164,6 +164,13 @@ app.post('/', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json', signinSchema)
       },
       401
     );
+  }
+
+  // Upgrade legacy bcrypt hash to Argon2 (non-blocking)
+  if (user.passwordHash && needsHashUpgrade(user.passwordHash)) {
+    hashPassword(body.password)
+      .then((newHash) => upgradePasswordHash(user.id, newHash))
+      .catch((err) => console.error('Failed to upgrade password hash:', err));
   }
 
   // Check MFA if enabled

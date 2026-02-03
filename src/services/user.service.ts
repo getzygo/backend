@@ -5,6 +5,7 @@
  */
 
 import { eq, and } from 'drizzle-orm';
+import * as argon2 from 'argon2';
 import * as bcrypt from 'bcryptjs';
 import { getDb } from '../db/client';
 import { users, socialLogins, auditLogs } from '../db/schema';
@@ -12,25 +13,70 @@ import type { User, NewUser, NewSocialLogin, NewAuditLog } from '../db/schema';
 import type { OAuthProvider, OAuthPendingSignup } from '../types/oauth';
 
 /**
- * Bcrypt salt rounds (OWASP recommended: 10-12)
+ * Argon2id configuration (OWASP recommended)
+ * - memoryCost: 64 MB (65536 KiB)
+ * - timeCost: 3 iterations
+ * - parallelism: 4 threads
  */
-const BCRYPT_SALT_ROUNDS = 12;
+const ARGON2_OPTIONS: argon2.Options = {
+  type: argon2.argon2id,
+  memoryCost: 65536,
+  timeCost: 3,
+  parallelism: 4,
+};
 
 /**
- * Hash a password using bcrypt
+ * Hash a password using Argon2id
+ * Argon2id is the recommended algorithm for password hashing (PHC winner)
  */
 export async function hashPassword(password: string): Promise<string> {
-  return bcrypt.hash(password, BCRYPT_SALT_ROUNDS);
+  return argon2.hash(password, ARGON2_OPTIONS);
 }
 
 /**
  * Verify a password against a hash
+ * Supports both Argon2 (new) and bcrypt (legacy) hashes for migration
  */
 export async function verifyPassword(
   password: string,
   hash: string
 ): Promise<boolean> {
-  return bcrypt.compare(password, hash);
+  // Argon2 hashes start with $argon2
+  if (hash.startsWith('$argon2')) {
+    return argon2.verify(hash, password);
+  }
+  // Legacy bcrypt hashes start with $2a$ or $2b$
+  if (hash.startsWith('$2a$') || hash.startsWith('$2b$')) {
+    return bcrypt.compare(password, hash);
+  }
+  // Unknown hash format
+  return false;
+}
+
+/**
+ * Check if a password hash needs to be upgraded to Argon2
+ * Returns true for legacy bcrypt hashes
+ */
+export function needsHashUpgrade(hash: string): boolean {
+  return hash.startsWith('$2a$') || hash.startsWith('$2b$');
+}
+
+/**
+ * Upgrade a user's password hash to Argon2
+ * Call this after successful password verification for legacy hashes
+ */
+export async function upgradePasswordHash(
+  userId: string,
+  newHash: string
+): Promise<void> {
+  const db = getDb();
+  await db
+    .update(users)
+    .set({
+      passwordHash: newHash,
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
 }
 
 /**
@@ -417,6 +463,8 @@ export async function updateSocialLoginTimestamp(
 export const userService = {
   hashPassword,
   verifyPassword,
+  needsHashUpgrade,
+  upgradePasswordHash,
   getUserByEmail,
   getUserById,
   getSocialLogin,
