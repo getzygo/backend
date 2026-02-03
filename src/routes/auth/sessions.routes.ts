@@ -13,6 +13,7 @@ import {
   revokeSession,
   revokeAllSessions,
 } from '../../services/session.service';
+import { signOutUser } from '../../services/supabase.service';
 
 const app = new Hono();
 
@@ -50,6 +51,7 @@ app.get('/', authMiddleware, async (c) => {
 /**
  * POST /api/v1/auth/sessions/:id/revoke
  * Revoke a specific session.
+ * Also invalidates all Supabase sessions to ensure the revoked session can't make API calls.
  */
 app.post('/:id/revoke', authMiddleware, async (c) => {
   const user = c.get('user');
@@ -69,15 +71,24 @@ app.post('/:id/revoke', authMiddleware, async (c) => {
     );
   }
 
+  // Invalidate all Supabase sessions for this user to ensure revoked session can't make API calls
+  // This is a security measure - the user will need to re-login on all devices
+  const signOutResult = await signOutUser(user.id);
+  if (signOutResult.error) {
+    console.error('Failed to sign out user from Supabase:', signOutResult.error);
+  }
+
   return c.json({
     success: true,
-    message: 'Session revoked successfully',
+    message: 'Session revoked successfully. You may need to sign in again on all devices.',
+    requires_reauth: true,
   });
 });
 
 /**
  * POST /api/v1/auth/sessions/revoke-all
  * Revoke all sessions except the current one.
+ * Also invalidates all Supabase sessions for security.
  */
 app.post('/revoke-all', authMiddleware, async (c) => {
   const user = c.get('user');
@@ -94,10 +105,19 @@ app.post('/revoke-all', authMiddleware, async (c) => {
     userAgent
   );
 
+  // Invalidate all Supabase sessions for security
+  if (revokedCount > 0) {
+    const signOutResult = await signOutUser(user.id);
+    if (signOutResult.error) {
+      console.error('Failed to sign out user from Supabase:', signOutResult.error);
+    }
+  }
+
   return c.json({
     success: true,
-    message: `${revokedCount} session${revokedCount !== 1 ? 's' : ''} revoked`,
+    message: `${revokedCount} session${revokedCount !== 1 ? 's' : ''} revoked. You may need to sign in again.`,
     revoked_count: revokedCount,
+    requires_reauth: revokedCount > 0,
   });
 });
 

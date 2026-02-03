@@ -195,6 +195,22 @@ export async function signOut(accessToken: string): Promise<{ error: string | nu
 }
 
 /**
+ * Sign out a user from all sessions (admin operation)
+ * Used when revoking sessions to ensure tokens are invalidated server-side
+ */
+export async function signOutUser(userId: string): Promise<{ error: string | null }> {
+  const supabase = getSupabaseAdmin();
+
+  const { error } = await supabase.auth.admin.signOut(userId, 'global');
+
+  if (error) {
+    return { error: error.message };
+  }
+
+  return { error: null };
+}
+
+/**
  * Generate a password reset link
  */
 export async function generatePasswordResetLink(email: string): Promise<{
@@ -224,5 +240,6 @@ export const supabaseService = {
   updateAuthUser,
   deleteAuthUser,
   signOut,
+  signOutUser,
   generatePasswordResetLink,
 };
