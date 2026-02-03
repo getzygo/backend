@@ -214,3 +214,77 @@ export interface CategoryPreference {
 }
 
 export type CategoryPreferences = Record<string, CategoryPreference>;
+
+// ============================================================================
+// Reminder Logs Table
+// ============================================================================
+
+export const reminderLogs = pgTable(
+  'reminder_logs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    tenantId: uuid('tenant_id').references(() => tenants.id, { onDelete: 'cascade' }),
+
+    // Reminder type: 'mfa_enablement' | 'phone_verification' | 'trial_expiration'
+    reminderType: varchar('reminder_type', { length: 50 }).notNull(),
+    // Stage: 'first' | 'final'
+    stage: varchar('stage', { length: 20 }).notNull(),
+
+    // Email delivery status
+    emailSent: boolean('email_sent').notNull().default(false),
+    emailSentAt: timestamp('email_sent_at', { withTimezone: true }),
+    emailError: text('email_error'),
+
+    // In-app notification status
+    inAppSent: boolean('in_app_sent').notNull().default(false),
+    inAppSentAt: timestamp('in_app_sent_at', { withTimezone: true }),
+
+    // Deadline tracking
+    deadlineAt: timestamp('deadline_at', { withTimezone: true }),
+
+    // Additional metadata
+    metadata: jsonb('metadata').default({}),
+
+    // Timestamps
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    // Unique constraint to prevent duplicate reminders
+    uniqueReminderIdx: uniqueIndex('idx_reminder_logs_unique').on(
+      table.userId,
+      table.tenantId,
+      table.reminderType,
+      table.stage
+    ),
+    // Query by user
+    userIdx: index('idx_reminder_logs_user').on(table.userId),
+    // Query by tenant
+    tenantIdx: index('idx_reminder_logs_tenant').on(table.tenantId),
+  })
+);
+
+// ============================================================================
+// Reminder Logs Relations
+// ============================================================================
+
+export const reminderLogsRelations = relations(reminderLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [reminderLogs.userId],
+    references: [users.id],
+  }),
+  tenant: one(tenants, {
+    fields: [reminderLogs.tenantId],
+    references: [tenants.id],
+  }),
+}));
+
+// ============================================================================
+// Reminder Logs Types
+// ============================================================================
+
+export type ReminderLog = typeof reminderLogs.$inferSelect;
+export type NewReminderLog = typeof reminderLogs.$inferInsert;
+
+export type ReminderType = 'mfa_enablement' | 'phone_verification' | 'trial_expiration';
+export type ReminderStage = 'first' | 'final';

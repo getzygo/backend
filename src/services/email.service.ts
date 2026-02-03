@@ -20,6 +20,9 @@ import { MfaEnabled } from '../emails/templates/mfa-enabled';
 import { MfaDisabled } from '../emails/templates/mfa-disabled';
 import { SessionRevoked } from '../emails/templates/session-revoked';
 import { BackupCodesRegenerated } from '../emails/templates/backup-codes-regenerated';
+import { MfaReminder } from '../emails/templates/mfa-reminder';
+import { PhoneReminder } from '../emails/templates/phone-reminder';
+import { TrialReminder } from '../emails/templates/trial-reminder';
 
 // Types
 interface SendEmailOptions {
@@ -474,6 +477,122 @@ export async function sendBackupCodesRegeneratedEmail(
   });
 }
 
+/**
+ * Send MFA reminder email (ALWAYS_SEND - cannot be disabled)
+ */
+export async function sendMfaReminderEmail(
+  email: string,
+  options: {
+    firstName?: string;
+    daysRemaining: number;
+    deadlineDate: string;
+    isFinal: boolean;
+    appUrl?: string;
+  }
+): Promise<SendEmailResult> {
+  const baseUrl = options.appUrl || 'https://app.getzygo.com';
+
+  if (!isSmtpConfigured()) {
+    console.log(`[DEV] MFA reminder email would be sent to ${email}:`, options);
+    return { sent: true };
+  }
+
+  const subject = options.isFinal
+    ? 'Action Required: Enable 2FA by tomorrow - Zygo'
+    : 'Reminder: Enable two-factor authentication - Zygo';
+
+  return sendEmail({
+    to: email,
+    subject,
+    template: MfaReminder({
+      firstName: options.firstName || 'there',
+      daysRemaining: options.daysRemaining,
+      deadlineDate: options.deadlineDate,
+      isFinal: options.isFinal,
+      appUrl: baseUrl,
+    }),
+  });
+}
+
+/**
+ * Send phone verification reminder email (ALWAYS_SEND - cannot be disabled)
+ */
+export async function sendPhoneReminderEmail(
+  email: string,
+  options: {
+    firstName?: string;
+    daysRemaining: number;
+    deadlineDate: string;
+    isFinal: boolean;
+    appUrl?: string;
+  }
+): Promise<SendEmailResult> {
+  const baseUrl = options.appUrl || 'https://app.getzygo.com';
+
+  if (!isSmtpConfigured()) {
+    console.log(`[DEV] Phone reminder email would be sent to ${email}:`, options);
+    return { sent: true };
+  }
+
+  const subject = options.isFinal
+    ? 'Action Required: Verify your phone by tomorrow - Zygo'
+    : 'Reminder: Verify your phone number - Zygo';
+
+  return sendEmail({
+    to: email,
+    subject,
+    template: PhoneReminder({
+      firstName: options.firstName || 'there',
+      daysRemaining: options.daysRemaining,
+      deadlineDate: options.deadlineDate,
+      isFinal: options.isFinal,
+      appUrl: baseUrl,
+    }),
+  });
+}
+
+/**
+ * Send trial expiration reminder email (ALLOW_DISABLE - user can unsubscribe)
+ */
+export async function sendTrialReminderEmail(
+  email: string,
+  options: {
+    firstName?: string;
+    tenantName?: string;
+    daysRemaining: number;
+    expirationDate: string;
+    isFinal: boolean;
+    appUrl?: string;
+  }
+): Promise<SendEmailResult> {
+  const baseUrl = options.appUrl || 'https://app.getzygo.com';
+
+  if (!isSmtpConfigured()) {
+    console.log(`[DEV] Trial reminder email would be sent to ${email}:`, options);
+    return { sent: true };
+  }
+
+  const subject = options.isFinal
+    ? 'Your trial ends tomorrow - Zygo'
+    : `Your trial ends in ${options.daysRemaining} days - Zygo`;
+
+  return sendEmail({
+    to: email,
+    subject,
+    template: TrialReminder({
+      firstName: options.firstName || 'there',
+      tenantName: options.tenantName,
+      daysRemaining: options.daysRemaining,
+      expirationDate: options.expirationDate,
+      isFinal: options.isFinal,
+      appUrl: baseUrl,
+    }),
+    headers: {
+      'List-Unsubscribe': `<${baseUrl}/settings/notifications>`,
+    },
+  });
+}
+
 // Export the service object for backwards compatibility
 export const emailService = {
   sendVerificationEmail,
@@ -488,4 +607,7 @@ export const emailService = {
   sendMfaDisabledEmail,
   sendSessionRevokedEmail,
   sendBackupCodesRegeneratedEmail,
+  sendMfaReminderEmail,
+  sendPhoneReminderEmail,
+  sendTrialReminderEmail,
 };

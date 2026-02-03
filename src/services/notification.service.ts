@@ -30,7 +30,14 @@ export type NotificationCategory =
   | 'workflow_created'
   | 'workflow_published'
   | 'team_invitation'
-  | 'integration_failure';
+  | 'integration_failure'
+  // Reminder categories
+  | 'mfa_enablement_first'
+  | 'mfa_enablement_final'
+  | 'phone_verification_first'
+  | 'phone_verification_final'
+  | 'trial_expiration_first'
+  | 'trial_expiration_final';
 export type NotificationSeverity = 'info' | 'warning' | 'danger' | 'success';
 
 // Server-side policy - NOT controlled by UI toggles
@@ -48,6 +55,14 @@ export const ALERT_POLICIES = {
   workflow_published: 'ALLOW_DISABLE',
   team_invitation: 'ALLOW_DISABLE',
   integration_failure: 'ALLOW_DISABLE',
+  // Reminder policies - MFA and phone are critical security reminders
+  mfa_enablement_first: 'ALWAYS_SEND',
+  mfa_enablement_final: 'ALWAYS_SEND',
+  phone_verification_first: 'ALWAYS_SEND',
+  phone_verification_final: 'ALWAYS_SEND',
+  // Trial reminders can be disabled by user
+  trial_expiration_first: 'ALLOW_DISABLE',
+  trial_expiration_final: 'ALLOW_DISABLE',
 } as const;
 
 interface CreateNotificationOptions {
