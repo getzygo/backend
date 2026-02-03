@@ -27,7 +27,11 @@ import {
   renamePasskey,
 } from '../../services/webauthn.service';
 import { getSupabaseAdmin } from '../../services/supabase.service';
-import { generateAuthToken } from '../../services/auth-token.service';
+import { createAuthToken } from '../../services/auth-token.service';
+import { getUserTenants, getTenantMembershipWithRole } from '../../services/tenant.service';
+import { parseUserAgent } from '../../services/device-fingerprint.service';
+import { createSession } from '../../services/session.service';
+import crypto from 'crypto';
 
 const app = new Hono();
 
@@ -172,44 +176,46 @@ app.post('/authenticate/verify', zValidator('json', authVerifySchema), async (c)
     );
   }
 
-  // Create Supabase session
-  const supabase = getSupabaseAdmin();
-  const { data: authData, error: authError } = await supabase.auth.admin.generateLink({
-    type: 'magiclink',
-    email: user.email,
-  });
-
-  if (authError) {
-    console.error('[WebAuthn] Failed to generate session:', authError);
-    return c.json(
-      {
-        error: 'session_failed',
-        message: 'Failed to create session.',
-      },
-      500
-    );
-  }
-
-  // Generate opaque auth token for cross-domain redirect
-  const authToken = await generateAuthToken(user.id, {
-    access_token: authData.properties?.access_token || '',
-    refresh_token: authData.properties?.refresh_token || '',
-    expires_in: 3600,
-    token_type: 'bearer',
-  });
-
   // Update last login
   await db
     .update(users)
     .set({
       lastLoginAt: new Date(),
-      lastLoginIp: ipAddress || null,
+      lastLoginIp: ipAddress || undefined,
+      updatedAt: new Date(),
     })
     .where(eq(users.id, user.id));
 
-  return c.json({
+  // Create session record for session management
+  const deviceInfo = parseUserAgent(userAgent);
+  const passkeySessionToken = crypto.randomBytes(32).toString('hex');
+  await createSession({
+    userId: user.id,
+    refreshToken: passkeySessionToken,
+    deviceName: deviceInfo.deviceName,
+    browser: deviceInfo.browser,
+    os: deviceInfo.os,
+    ipAddress: ipAddress || undefined,
+  });
+
+  // Get user's tenants
+  const userTenants = await getUserTenants(user.id);
+
+  // Audit log
+  await db.insert(auditLogs).values({
+    userId: user.id,
+    action: 'login_passkey',
+    resourceType: 'user',
+    resourceId: user.id,
+    details: { method: 'passkey', tenant_count: userTenants.length },
+    ipAddress: ipAddress || undefined,
+    userAgent: userAgent || undefined,
+    status: 'success',
+  });
+
+  // Build response
+  const responseData: Record<string, unknown> = {
     success: true,
-    auth_token: authToken,
     user: {
       id: user.id,
       email: user.email,
@@ -218,7 +224,62 @@ app.post('/authenticate/verify', zValidator('json', authVerifySchema), async (c)
       email_verified: user.emailVerified,
       mfa_enabled: user.mfaEnabled,
     },
-  });
+  };
+
+  // Map user's tenant memberships for the switcher UI
+  const tenantMemberships = userTenants.map((m) => ({
+    id: m.tenant.id,
+    name: m.tenant.name,
+    slug: m.tenant.slug,
+    plan: m.tenant.plan,
+    role: {
+      id: m.role.id,
+      name: m.role.name,
+    },
+    isOwner: m.isOwner,
+  }));
+
+  // If user has only one tenant, generate auth token directly
+  if (userTenants.length === 1) {
+    const membership = userTenants[0];
+    const authToken = await createAuthToken({
+      userId: user.id,
+      tenantId: membership.tenant.id,
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      avatarUrl: user.avatarUrl || undefined,
+      avatarSource: user.avatarSource || undefined,
+      emailVerified: user.emailVerified,
+      emailVerifiedVia: user.emailVerifiedVia,
+      roleId: membership.role.id,
+      roleName: membership.role.name,
+      roleSlug: membership.role.slug,
+      isOwner: membership.isOwner,
+      tenantMemberships,
+    });
+    responseData.auth_token = authToken;
+    responseData.redirect_url = `https://${membership.tenant.slug}.zygo.tech?auth_token=${authToken}`;
+  } else if (userTenants.length === 0) {
+    responseData.redirect_url = '/create-workspace';
+  } else {
+    // Multiple tenants - show workspace picker
+    responseData.tenants = userTenants.map((m) => ({
+      id: m.tenant.id,
+      name: m.tenant.name,
+      slug: m.tenant.slug,
+      type: m.tenant.type,
+      plan: m.tenant.plan,
+      role: {
+        id: m.role.id,
+        name: m.role.name,
+      },
+      is_owner: m.isOwner,
+    }));
+    responseData.redirect_url = '/select-workspace';
+  }
+
+  return c.json(responseData);
 });
 
 /**

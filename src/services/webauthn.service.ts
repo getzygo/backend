@@ -10,18 +10,14 @@ import {
   verifyRegistrationResponse,
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
-  type VerifiedRegistrationResponse,
-  type VerifiedAuthenticationResponse,
-  type GenerateRegistrationOptionsOpts,
-  type GenerateAuthenticationOptionsOpts,
-  type VerifyRegistrationResponseOpts,
-  type VerifyAuthenticationResponseOpts,
 } from '@simplewebauthn/server';
 import type {
   RegistrationResponseJSON,
   AuthenticationResponseJSON,
   AuthenticatorTransportFuture,
-} from '@simplewebauthn/types';
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+} from '@simplewebauthn/server';
 import { eq, and, gt } from 'drizzle-orm';
 import { getDb } from '../db/client';
 import { passkeys, webauthnChallenges, users, auditLogs } from '../db/schema';
