@@ -256,8 +256,44 @@ app.post('/signin', async (c) => {
       const supabaseMeta = supabaseUser.user_metadata || {};
       const avatarUrl = user.avatarUrl || supabaseMeta.avatar_url || supabaseMeta.picture;
 
-      // Always show workspace picker - don't auto-select even for single tenant
-      // This gives users better control and prevents confusion after logout
+      // Map user's tenant memberships for the switcher UI (cached, no API calls needed)
+      const tenantMemberships = userTenants.map((m) => ({
+        id: m.tenant.id,
+        name: m.tenant.name,
+        slug: m.tenant.slug,
+        plan: m.tenant.plan,
+        role: {
+          id: m.role.id,
+          name: m.role.name,
+        },
+        isOwner: m.isOwner,
+      }));
+
+      // Generate auth token for the first/only tenant if there's just one
+      // This allows direct redirect without workspace picker for single-tenant users
+      if (userTenants.length === 1) {
+        const membership = userTenants[0];
+        const authToken = await createAuthToken({
+          userId: user.id,
+          tenantId: membership.tenant.id,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          avatarUrl: avatarUrl || undefined,
+          avatarSource: user.avatarSource || undefined,
+          emailVerified: user.emailVerified,
+          emailVerifiedVia: user.emailVerifiedVia,
+          roleId: membership.role.id,
+          roleName: membership.role.name,
+          roleSlug: membership.role.slug,
+          isOwner: membership.isOwner,
+          supabaseAccessToken: supabase_access_token,
+          tenantMemberships,
+        });
+        response.auth_token = authToken;
+      }
+
+      // Always include tenant list
       response.tenants = userTenants.map((m) => ({
         id: m.tenant.id,
         name: m.tenant.name,

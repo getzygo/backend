@@ -16,6 +16,11 @@ import completeProfileRoutes from './complete-profile.routes';
 import passwordResetRoutes from './password-reset.routes';
 import changePasswordRoutes from './change-password.routes';
 import verifyTokenRoutes from './verify-token.routes';
+import sessionsRoutes from './sessions.routes';
+import trustedDevicesRoutes from './trusted-devices.routes';
+import magicLinkRoutes from './magic-link.routes';
+import webauthnRoutes from './webauthn.routes';
+import passwordSecurityRoutes from './password-security.routes';
 
 const app = new Hono();
 
@@ -84,5 +89,38 @@ app.route('/change-password', changePasswordRoutes);
 // Token verification routes (for cross-domain auth)
 // POST /api/v1/auth/verify-token
 app.route('/verify-token', verifyTokenRoutes);
+
+// Session management routes
+// GET /api/v1/auth/sessions
+// POST /api/v1/auth/sessions/:id/revoke
+// POST /api/v1/auth/sessions/revoke-all
+app.route('/sessions', sessionsRoutes);
+
+// Trusted devices routes (extends MFA)
+// POST /api/v1/auth/mfa/trust-device
+// GET /api/v1/auth/mfa/trusted-devices
+// POST /api/v1/auth/mfa/check-trust
+// DELETE /api/v1/auth/mfa/trusted-devices/:id
+// DELETE /api/v1/auth/mfa/trusted-devices
+app.route('/mfa', trustedDevicesRoutes);
+
+// Magic link routes
+// POST /api/v1/auth/magic-link/send
+// POST /api/v1/auth/magic-link/verify
+app.route('/magic-link', magicLinkRoutes);
+
+// WebAuthn/Passkeys routes
+// POST /api/v1/auth/webauthn/register/options
+// POST /api/v1/auth/webauthn/register/verify
+// POST /api/v1/auth/webauthn/authenticate/options
+// POST /api/v1/auth/webauthn/authenticate/verify
+// GET /api/v1/auth/webauthn/credentials
+// DELETE /api/v1/auth/webauthn/credentials/:id
+// PATCH /api/v1/auth/webauthn/credentials/:id
+app.route('/webauthn', webauthnRoutes);
+
+// Password security routes
+// POST /api/v1/auth/password/check-breach
+app.route('/password', passwordSecurityRoutes);
 
 export default app;

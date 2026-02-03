@@ -13,12 +13,11 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { eq, desc, and, inArray, sql } from 'drizzle-orm';
 import { authMiddleware } from '../middleware/auth.middleware';
 import { tenantMiddleware, optionalTenantMiddleware, requireTenantMembership } from '../middleware/tenant.middleware';
 import { getDb } from '../db/client';
 import { users, auditLogs, tenantMembers } from '../db/schema';
-import { and } from 'drizzle-orm';
 import {
   extractStoragePath,
   isExternalAvatarUrl,
@@ -668,6 +667,134 @@ app.get('/search', authMiddleware, optionalTenantMiddleware, async (c) => {
       has_avatar: !!u.avatarUrl,
       job_title: null, // No tenant context, no job_title
     })),
+  });
+});
+
+/**
+ * GET /api/v1/users/me/activity
+ * Get current user's activity log (paginated)
+ * Returns: login, logout, password_change, mfa_enable, mfa_disable, profile_update, session_revoke
+ */
+app.get('/me/activity', authMiddleware, async (c) => {
+  const user = c.get('user');
+  const page = Math.max(1, parseInt(c.req.query('page') || '1'));
+  const limit = Math.min(50, Math.max(1, parseInt(c.req.query('limit') || '20')));
+  const actionFilter = c.req.query('action'); // Optional filter by action type
+
+  const db = getDb();
+  const offset = (page - 1) * limit;
+
+  // Allowed actions for activity log
+  const allowedActions = [
+    'login',
+    'logout',
+    'password_change',
+    'password_changed',
+    'mfa_enable',
+    'mfa_enabled',
+    'mfa_disable',
+    'mfa_disabled',
+    'profile_update',
+    'profile_updated',
+    'session_revoke',
+    'session_revoked',
+    'avatar_uploaded',
+    'passkey_register',
+    'passkey_remove',
+    'device_trust',
+    'suspicious_login',
+  ];
+
+  // Build filter conditions
+  const conditions = [eq(auditLogs.userId, user.id)];
+
+  // Filter by specific action if provided
+  if (actionFilter && allowedActions.includes(actionFilter)) {
+    // Map normalized actions to all variations
+    const actionMap: Record<string, string[]> = {
+      login: ['login'],
+      logout: ['logout'],
+      password_change: ['password_change', 'password_changed'],
+      mfa_enable: ['mfa_enable', 'mfa_enabled'],
+      mfa_disable: ['mfa_disable', 'mfa_disabled'],
+      profile_update: ['profile_update', 'profile_updated', 'avatar_uploaded'],
+      session_revoke: ['session_revoke', 'session_revoked'],
+      passkey_register: ['passkey_register'],
+      passkey_remove: ['passkey_remove'],
+      device_trust: ['device_trust'],
+      suspicious_login: ['suspicious_login'],
+    };
+    const actionsToFilter = actionMap[actionFilter] || [actionFilter];
+    conditions.push(inArray(auditLogs.action, actionsToFilter));
+  } else {
+    // Default: show all allowed actions
+    conditions.push(inArray(auditLogs.action, allowedActions));
+  }
+
+  // Get total count
+  const countResult = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(auditLogs)
+    .where(and(...conditions));
+  const totalCount = countResult[0]?.count || 0;
+  const totalPages = Math.ceil(totalCount / limit);
+
+  // Get paginated activities
+  const activities = await db.query.auditLogs.findMany({
+    where: and(...conditions),
+    orderBy: desc(auditLogs.createdAt),
+    limit,
+    offset,
+  });
+
+  // Transform to API response format
+  const transformedActivities = activities.map((log) => {
+    // Normalize action names for frontend
+    let normalizedAction = log.action;
+    if (log.action === 'password_changed') normalizedAction = 'password_change';
+    if (log.action === 'mfa_enabled') normalizedAction = 'mfa_enable';
+    if (log.action === 'mfa_disabled') normalizedAction = 'mfa_disable';
+    if (log.action === 'profile_updated' || log.action === 'avatar_uploaded') normalizedAction = 'profile_update';
+    if (log.action === 'session_revoked') normalizedAction = 'session_revoke';
+
+    // Extract device info from details
+    const details = (log.details || {}) as Record<string, any>;
+    let device = undefined;
+    if (details.browser || details.os || details.device_name) {
+      device = {
+        name: details.device_name,
+        browser: details.browser,
+        os: details.os,
+      };
+    }
+
+    // Extract location from details
+    let location = undefined;
+    if (details.city || details.country) {
+      location = {
+        city: details.city,
+        country: details.country,
+      };
+    }
+
+    return {
+      id: log.id,
+      action: normalizedAction,
+      timestamp: log.createdAt.toISOString(),
+      ip_address: log.ipAddress,
+      location,
+      device,
+      details: details,
+      status: log.status as 'success' | 'failure',
+    };
+  });
+
+  return c.json({
+    activities: transformedActivities,
+    page,
+    limit,
+    total_count: totalCount,
+    total_pages: totalPages,
   });
 });
 

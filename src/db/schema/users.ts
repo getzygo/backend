@@ -78,6 +78,12 @@ export const users = pgTable(
     lockedUntil: timestamp('locked_until', { withTimezone: true }),
     passwordChangedAt: timestamp('password_changed_at', { withTimezone: true }),
 
+    // Enhanced security fields
+    passwordBreachedAt: timestamp('password_breached_at', { withTimezone: true }),
+    loginNotificationEnabled: boolean('login_notification_enabled').notNull().default(true),
+    webauthnEnabled: boolean('webauthn_enabled').notNull().default(false),
+    preferredAuthMethod: varchar('preferred_auth_method', { length: 20 }).default('password'),
+
     // Administrative blocking (different from login lockout)
     blockedUntil: timestamp('blocked_until', { withTimezone: true }),
     blockReason: varchar('block_reason', { length: 100 }),

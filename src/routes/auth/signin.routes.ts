@@ -18,6 +18,7 @@ import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { createAuthToken } from '../../services/auth-token.service';
+import { trustDevice, checkDeviceTrust, generateDeviceFingerprint } from '../../services/trusted-device.service';
 
 const app = new Hono();
 
@@ -27,6 +28,7 @@ const signinSchema = z.object({
   password: z.string().min(1, 'Password is required'),
   tenant_slug: z.string().optional(),
   mfa_code: z.string().length(6).optional(),
+  trust_device: z.boolean().optional(),
 });
 
 /**
@@ -76,14 +78,17 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
 
   // Check if account is locked
   if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
-    const remainingMinutes = Math.ceil(
-      (new Date(user.lockedUntil).getTime() - Date.now()) / 60000
+    const lockoutSeconds = Math.ceil(
+      (new Date(user.lockedUntil).getTime() - Date.now()) / 1000
     );
+    const remainingMinutes = Math.ceil(lockoutSeconds / 60);
     return c.json(
       {
         error: 'account_locked',
         message: `Account is temporarily locked. Try again in ${remainingMinutes} minutes.`,
         locked_until: user.lockedUntil,
+        lockout_in: lockoutSeconds,
+        remaining_attempts: 0,
       },
       403
     );
@@ -100,6 +105,7 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
     if (attempts >= MAX_ATTEMPTS) {
       // Lock account for 15 minutes
       const lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+      const lockoutSeconds = 15 * 60;
 
       await db
         .update(users)
@@ -126,10 +132,14 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
         {
           error: 'account_locked',
           message: 'Too many failed attempts. Account locked for 15 minutes.',
+          remaining_attempts: 0,
+          lockout_in: lockoutSeconds,
         },
         403
       );
     }
+
+    const remainingAttempts = MAX_ATTEMPTS - attempts;
 
     await db
       .update(users)
@@ -143,6 +153,7 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
       {
         error: 'invalid_credentials',
         message: 'Invalid email or password',
+        remaining_attempts: remainingAttempts,
       },
       401
     );
@@ -150,26 +161,41 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
 
   // Check MFA if enabled
   if (user.mfaEnabled) {
-    if (!body.mfa_code) {
-      return c.json(
-        {
-          error: 'mfa_required',
-          message: 'MFA verification required',
-          require_mfa_code: true,
-        },
-        403
-      );
-    }
+    // Check if this device is trusted (can skip MFA)
+    const deviceFingerprint = generateDeviceFingerprint(userAgent || '', ipAddress || '');
+    const isTrusted = await checkDeviceTrust(user.id, deviceFingerprint);
 
-    const mfaResult = await mfaService.verifyMfaCode(user.id, body.mfa_code);
-    if (!mfaResult.verified) {
-      return c.json(
-        {
-          error: 'mfa_invalid',
-          message: mfaResult.error || 'Invalid MFA code',
-        },
-        403
-      );
+    if (!isTrusted) {
+      if (!body.mfa_code) {
+        return c.json(
+          {
+            error: 'mfa_required',
+            message: 'MFA verification required',
+            require_mfa_code: true,
+          },
+          403
+        );
+      }
+
+      const mfaResult = await mfaService.verifyMfaCode(user.id, body.mfa_code);
+      if (!mfaResult.verified) {
+        return c.json(
+          {
+            error: 'mfa_invalid',
+            message: mfaResult.error || 'Invalid MFA code',
+          },
+          403
+        );
+      }
+
+      // Trust device if requested after successful MFA verification
+      if (body.trust_device) {
+        await trustDevice(user.id, deviceFingerprint, {
+          deviceName: `${userAgent?.split(' ')[0] || 'Unknown'} Device`,
+          browser: userAgent?.match(/(Chrome|Firefox|Safari|Edge|Opera)\/[\d.]+/)?.[0]?.split('/')[0] || undefined,
+          os: userAgent?.match(/\((.*?)\)/)?.[1]?.split(';')[0] || undefined,
+        });
+      }
     }
   }
 
