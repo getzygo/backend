@@ -68,9 +68,10 @@ export async function userHasCorePlanTenant(userId: string): Promise<boolean> {
   });
 
   // Check if any owned tenant has Core plan
-  return memberships.some(
-    (m) => m.tenant.plan === 'core' && m.tenant.status === 'active'
-  );
+  return memberships.some((m) => {
+    const tenant = Array.isArray(m.tenant) ? m.tenant[0] : m.tenant;
+    return tenant?.plan === 'core' && tenant?.status === 'active';
+  });
 }
 
 /**
@@ -446,13 +447,18 @@ export async function getTenantMembershipWithRole(
     },
   });
 
-  if (!membership) {
+  if (!membership || !membership.primaryRole) {
+    return null;
+  }
+
+  const role = Array.isArray(membership.primaryRole) ? membership.primaryRole[0] : membership.primaryRole;
+  if (!role) {
     return null;
   }
 
   return {
     ...membership,
-    role: membership.primaryRole,
+    role,
   };
 }
 

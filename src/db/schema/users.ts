@@ -14,6 +14,7 @@ import {
   jsonb,
   index,
   uniqueIndex,
+  type AnyPgColumn,
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
@@ -34,7 +35,7 @@ export const users = pgTable(
     lastName: varchar('last_name', { length: 100 }),
     displayName: varchar('display_name', { length: 200 }),
     jobTitle: varchar('job_title', { length: 100 }),
-    reportingManagerId: uuid('reporting_manager_id').references(() => users.id, { onDelete: 'set null' }),
+    reportingManagerId: uuid('reporting_manager_id').references((): AnyPgColumn => users.id, { onDelete: 'set null' }),
     avatarUrl: text('avatar_url'),
     avatarSource: varchar('avatar_source', { length: 10 }), // 'upload' or 'oauth'
 

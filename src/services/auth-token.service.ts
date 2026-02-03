@@ -39,6 +39,7 @@ export interface AuthTokenPayload {
   firstName: string | null;
   lastName: string | null;
   avatarUrl?: string | null;
+  avatarSource?: string | null;
   emailVerified: boolean;
   emailVerifiedVia?: string | null;
   // RBAC data

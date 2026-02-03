@@ -887,6 +887,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         firstName: existingUser.firstName,
         lastName: existingUser.lastName,
         avatarUrl: avatarUrl,
+        avatarSource: existingUser.avatarSource || undefined,
         emailVerified: existingUser.emailVerified,
         emailVerifiedVia: existingUser.emailVerifiedVia || provider,
         roleId: tenantResult.ownerRole.id,
@@ -983,6 +984,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       firstName: result.user.firstName,
       lastName: result.user.lastName,
       avatarUrl: avatarUrl,
+      avatarSource: avatarUrl ? 'oauth' : undefined, // New OAuth signup
       emailVerified: result.user.emailVerified, // OAuth users are email-verified
       emailVerifiedVia: provider,
       roleId: result.role.id,

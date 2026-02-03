@@ -101,11 +101,12 @@ export async function getUserHierarchyLevel(userId: string, tenantId: string): P
     },
   });
 
-  if (!membership) {
+  if (!membership || !membership.primaryRole) {
     return 100; // Lowest privilege
   }
 
-  return membership.primaryRole.hierarchyLevel;
+  const role = membership.primaryRole;
+  return Array.isArray(role) ? role[0]?.hierarchyLevel ?? 100 : role.hierarchyLevel;
 }
 
 /**
@@ -383,12 +384,14 @@ export async function assignPrimaryRole(params: {
     },
   });
 
-  if (!membership) {
+  if (!membership || !membership.primaryRole) {
     throw new Error('User is not a member of this tenant');
   }
 
+  const currentRole = Array.isArray(membership.primaryRole) ? membership.primaryRole[0] : membership.primaryRole;
+
   // If changing from Owner role, ensure at least one Owner remains
-  if (membership.isOwner && membership.primaryRole.slug === 'owner') {
+  if (membership.isOwner && currentRole?.slug === 'owner') {
     const otherOwners = await db.query.tenantMembers.findMany({
       where: and(
         eq(tenantMembers.tenantId, tenantId),
