@@ -16,7 +16,7 @@ interface HeaderProps {
   logoUrl?: string;
 }
 
-export function Header({ logoUrl = 'https://getzygo.com/logo.png' }: HeaderProps) {
+export function Header({ logoUrl = 'https://demo.zygo.tech/logo.png' }: HeaderProps) {
   return (
     <Section style={headerStyle}>
       <Row>

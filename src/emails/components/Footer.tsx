@@ -45,11 +45,9 @@ export function Footer({ includeUnsubscribe = false, unsubscribeUrl }: FooterPro
       )}
 
       <Text style={addressStyle}>
-        Zygo Technologies
+        ZYGO AI Technologies
         <br />
-        [Physical Address Placeholder]
-        <br />
-        United States
+        Budapest, Hungary
       </Text>
 
       <Text style={copyrightStyle}>
