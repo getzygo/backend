@@ -12,7 +12,6 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, auditLogs, tenantMembers, tenants, roles } from '../../db/schema';
 import { createMagicLink, verifyMagicLink } from '../../services/magic-link.service';
-import { getSupabaseAdmin } from '../../services/supabase.service';
 import { createAuthToken, type TenantMembership } from '../../services/auth-token.service';
 
 const app = new Hono();
@@ -129,7 +128,7 @@ app.post('/verify', zValidator('json', verifySchema), async (c) => {
     })
     .from(tenantMembers)
     .innerJoin(tenants, eq(tenantMembers.tenantId, tenants.id))
-    .innerJoin(roles, eq(tenantMembers.roleId, roles.id))
+    .innerJoin(roles, eq(tenantMembers.primaryRoleId, roles.id))
     .where(
       and(
         eq(tenantMembers.userId, user.id),
@@ -144,45 +143,6 @@ app.post('/verify', zValidator('json', verifySchema), async (c) => {
         message: 'You are not a member of any workspace.',
       },
       403
-    );
-  }
-
-  // Create Supabase session using signInWithPassword (magic link creates a session)
-  const supabase = getSupabaseAdmin();
-
-  // For magic link, we need to create a session directly
-  // Use admin API to sign in the user
-  const { data: sessionData, error: sessionError } = await supabase.auth.admin.generateLink({
-    type: 'magiclink',
-    email: user.email,
-  });
-
-  if (sessionError || !sessionData) {
-    console.error('[MagicLink] Failed to generate session:', sessionError);
-    return c.json(
-      {
-        error: 'session_failed',
-        message: 'Failed to create session.',
-      },
-      500
-    );
-  }
-
-  // Extract tokens from the hashed_token response
-  // Note: generateLink returns a link, not tokens directly
-  // We need to use a different approach - create a custom session
-  const { data: userData, error: userError } = await supabase.auth.admin.getUserById(
-    user.supabaseUserId || ''
-  );
-
-  if (userError || !userData.user) {
-    console.error('[MagicLink] Failed to get Supabase user:', userError);
-    return c.json(
-      {
-        error: 'session_failed',
-        message: 'Failed to create session.',
-      },
-      500
     );
   }
 
