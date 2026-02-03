@@ -18,8 +18,9 @@ import changePasswordRoutes from './change-password.routes';
 import verifyTokenRoutes from './verify-token.routes';
 import sessionsRoutes from './sessions.routes';
 import trustedDevicesRoutes from './trusted-devices.routes';
-import magicLinkRoutes from './magic-link.routes';
-import webauthnRoutes from './webauthn.routes';
+// TODO: Fix magic-link and webauthn routes to use correct auth token service signature
+// import magicLinkRoutes from './magic-link.routes';
+// import webauthnRoutes from './webauthn.routes';
 import passwordSecurityRoutes from './password-security.routes';
 
 const app = new Hono();
@@ -104,10 +105,11 @@ app.route('/sessions', sessionsRoutes);
 // DELETE /api/v1/auth/mfa/trusted-devices
 app.route('/mfa', trustedDevicesRoutes);
 
+// TODO: Enable after fixing auth token service signature compatibility
 // Magic link routes
 // POST /api/v1/auth/magic-link/send
 // POST /api/v1/auth/magic-link/verify
-app.route('/magic-link', magicLinkRoutes);
+// app.route('/magic-link', magicLinkRoutes);
 
 // WebAuthn/Passkeys routes
 // POST /api/v1/auth/webauthn/register/options
@@ -117,7 +119,7 @@ app.route('/magic-link', magicLinkRoutes);
 // GET /api/v1/auth/webauthn/credentials
 // DELETE /api/v1/auth/webauthn/credentials/:id
 // PATCH /api/v1/auth/webauthn/credentials/:id
-app.route('/webauthn', webauthnRoutes);
+// app.route('/webauthn', webauthnRoutes);
 
 // Password security routes
 // POST /api/v1/auth/password/check-breach

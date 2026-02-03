@@ -18,7 +18,8 @@ import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { createAuthToken } from '../../services/auth-token.service';
-import { trustDevice, checkDeviceTrust, generateDeviceFingerprint } from '../../services/trusted-device.service';
+import { trustDevice, isDeviceTrusted } from '../../services/trusted-device.service';
+import { createDeviceHash } from '../../services/device-fingerprint.service';
 
 const app = new Hono();
 
@@ -162,8 +163,11 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
   // Check MFA if enabled
   if (user.mfaEnabled) {
     // Check if this device is trusted (can skip MFA)
-    const deviceFingerprint = generateDeviceFingerprint(userAgent || '', ipAddress || '');
-    const isTrusted = await checkDeviceTrust(user.id, deviceFingerprint);
+    const isTrusted = await isDeviceTrusted({
+      userId: user.id,
+      userAgent: userAgent || undefined,
+      ipAddress: ipAddress || undefined,
+    });
 
     if (!isTrusted) {
       if (!body.mfa_code) {
@@ -190,10 +194,10 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
 
       // Trust device if requested after successful MFA verification
       if (body.trust_device) {
-        await trustDevice(user.id, deviceFingerprint, {
-          deviceName: `${userAgent?.split(' ')[0] || 'Unknown'} Device`,
-          browser: userAgent?.match(/(Chrome|Firefox|Safari|Edge|Opera)\/[\d.]+/)?.[0]?.split('/')[0] || undefined,
-          os: userAgent?.match(/\((.*?)\)/)?.[1]?.split(';')[0] || undefined,
+        await trustDevice({
+          userId: user.id,
+          userAgent: userAgent || undefined,
+          ipAddress: ipAddress || undefined,
         });
       }
     }

@@ -13,7 +13,7 @@ import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
 import { createMagicLink, verifyMagicLink } from '../../services/magic-link.service';
 import { getSupabaseAdmin } from '../../services/supabase.service';
-import { generateAuthToken } from '../../services/auth-token.service';
+import { createAuthToken } from '../../services/auth-token.service';
 
 const app = new Hono();
 
