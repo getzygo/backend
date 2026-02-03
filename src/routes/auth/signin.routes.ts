@@ -23,6 +23,7 @@ import { createDeviceHash, parseUserAgent } from '../../services/device-fingerpr
 import { createSession } from '../../services/session.service';
 import { checkLoginForAlerts } from '../../services/login-alert.service';
 import { getLocationFromIP } from '../../services/geolocation.service';
+import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
 
@@ -38,8 +39,9 @@ const signinSchema = z.object({
 /**
  * POST /api/v1/auth/signin
  * Authenticate user and return session
+ * Rate limit: 5 requests per minute (brute force protection)
  */
-app.post('/', zValidator('json', signinSchema), async (c) => {
+app.post('/', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json', signinSchema), async (c) => {
   const body = c.req.valid('json');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');

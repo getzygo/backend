@@ -20,8 +20,12 @@ import {
   sendMfaDisabledEmail,
   sendBackupCodesRegeneratedEmail,
 } from '../../services/email.service';
+import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
+
+// Apply rate limiting to all MFA routes (prevent code guessing)
+app.use('*', rateLimit(RATE_LIMITS.SENSITIVE));
 
 // MFA code schema
 const mfaCodeSchema = z.object({

@@ -13,8 +13,12 @@ import { authMiddleware, requireEmailVerified } from '../../middleware/auth.midd
 import { smsService } from '../../services/sms.service';
 import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
+import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
+
+// Apply strict rate limiting to phone verification (SMS costs money)
+app.use('*', rateLimit(RATE_LIMITS.STRICT));
 
 // Country dial codes map
 const countryDialCodes: Record<string, string> = {

@@ -38,8 +38,12 @@ import type { User } from '../../db/schema';
 import { createAuthToken } from '../../services/auth-token.service';
 import { parseUserAgent } from '../../services/device-fingerprint.service';
 import { createSession } from '../../services/session.service';
+import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
+
+// Apply rate limiting to OAuth routes
+app.use('*', rateLimit(RATE_LIMITS.AUTH));
 
 // OAuth callback schema
 const callbackSchema = z.object({

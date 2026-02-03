@@ -20,6 +20,7 @@ import { getUserByEmail, hashPassword } from '../../services/user.service';
 import { updateAuthUser } from '../../services/supabase.service';
 import { getEnv } from '../../config/env';
 import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../../services/email.service';
+import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
 
@@ -64,8 +65,9 @@ const resetPasswordSchema = z.object({
 /**
  * POST /api/v1/auth/forgot-password
  * Request password reset - sends 6-digit code to email
+ * Rate limit: 3 requests per minute (prevent email bombing)
  */
-app.post('/forgot-password', zValidator('json', forgotPasswordSchema), async (c) => {
+app.post('/forgot-password', rateLimit(RATE_LIMITS.STRICT), zValidator('json', forgotPasswordSchema), async (c) => {
   const { email } = c.req.valid('json');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
@@ -146,8 +148,9 @@ app.post('/forgot-password', zValidator('json', forgotPasswordSchema), async (c)
 /**
  * POST /api/v1/auth/verify-reset-code
  * Verify the reset code and return a reset token
+ * Rate limit: 5 requests per minute (prevent code guessing)
  */
-app.post('/verify-reset-code', zValidator('json', verifyCodeSchema), async (c) => {
+app.post('/verify-reset-code', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json', verifyCodeSchema), async (c) => {
   const { email, code } = c.req.valid('json');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
@@ -262,8 +265,9 @@ app.post('/verify-reset-code', zValidator('json', verifyCodeSchema), async (c) =
 /**
  * POST /api/v1/auth/reset-password
  * Reset password with valid reset token
+ * Rate limit: 5 requests per minute
  */
-app.post('/reset-password', zValidator('json', resetPasswordSchema), async (c) => {
+app.post('/reset-password', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json', resetPasswordSchema), async (c) => {
   const { email, reset_token, password } = c.req.valid('json');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');

@@ -23,6 +23,7 @@ import { createAuthToken } from '../../services/auth-token.service';
 import { signInWithPassword } from '../../services/supabase.service';
 import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
+import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
 
@@ -94,8 +95,9 @@ const signupSchema = z.object({
 /**
  * POST /api/v1/auth/signup
  * Complete onboarding wizard signup
+ * Rate limit: 10 requests per 15 minutes
  */
-app.post('/', zValidator('json', signupSchema), async (c) => {
+app.post('/', rateLimit(RATE_LIMITS.AUTH), zValidator('json', signupSchema), async (c) => {
   const body = c.req.valid('json');
 
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');

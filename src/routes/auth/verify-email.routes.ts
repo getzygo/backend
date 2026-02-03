@@ -13,8 +13,12 @@ import { authMiddleware } from '../../middleware/auth.middleware';
 import { emailService, sendWelcomeEmail } from '../../services/email.service';
 import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
+import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
+
+// Apply rate limiting to all email verification routes
+app.use('*', rateLimit(RATE_LIMITS.SENSITIVE));
 
 // Verify email schema (authenticated)
 const verifyEmailSchema = z.object({
