@@ -15,6 +15,11 @@ import { authMiddleware, requireEmailVerified } from '../../middleware/auth.midd
 import { mfaService } from '../../services/mfa.service';
 import { getDb } from '../../db/client';
 import { auditLogs } from '../../db/schema';
+import {
+  sendMfaEnabledEmail,
+  sendMfaDisabledEmail,
+  sendBackupCodesRegeneratedEmail,
+} from '../../services/email.service';
 
 const app = new Hono();
 
@@ -113,6 +118,11 @@ app.post(
       ipAddress: ipAddress || undefined,
       userAgent: userAgent || undefined,
       status: 'success',
+    });
+
+    // Send MFA enabled notification email (ALLOW_DISABLE - user can turn this off)
+    sendMfaEnabledEmail(user.email, user.firstName || undefined, 'totp').catch((err) => {
+      console.error('Failed to send MFA enabled email:', err);
     });
 
     return c.json({
@@ -214,6 +224,14 @@ app.post(
       status: 'success',
     });
 
+    // Send MFA disabled notification email (ALWAYS_SEND - cannot be disabled)
+    sendMfaDisabledEmail(user.email, user.firstName || undefined, {
+      ipAddress: ipAddress || undefined,
+      deviceInfo: userAgent || undefined,
+    }).catch((err) => {
+      console.error('Failed to send MFA disabled email:', err);
+    });
+
     return c.json({
       disabled: true,
     });
@@ -269,6 +287,14 @@ app.post(
       ipAddress: ipAddress || undefined,
       userAgent: userAgent || undefined,
       status: 'success',
+    });
+
+    // Send backup codes regenerated notification email (ALLOW_DISABLE)
+    sendBackupCodesRegeneratedEmail(user.email, user.firstName || undefined, {
+      ipAddress: ipAddress || undefined,
+      deviceInfo: userAgent || undefined,
+    }).catch((err) => {
+      console.error('Failed to send backup codes regenerated email:', err);
     });
 
     return c.json({

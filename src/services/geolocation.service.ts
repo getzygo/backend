@@ -3,11 +3,17 @@
  *
  * Provides IP-based geolocation using geoip-lite.
  * Falls back gracefully when location cannot be determined.
+ *
+ * PRIVACY NOTE (GDPR Compliance):
+ * - Only stores city/country (NOT full coordinates)
+ * - IP addresses are NOT stored with notification data
+ * - Retention: 90 days max for security event metadata
+ * - Lawful basis: "security and fraud prevention"
  */
 
 import geoip from 'geoip-lite';
 
-interface GeoLocation {
+export interface GeoLocation {
   city?: string;
   region?: string;
   country?: string;
@@ -201,6 +207,29 @@ function getCountryName(code: string): string {
     BE: 'Belgium',
     PT: 'Portugal',
     CZ: 'Czech Republic',
+    UA: 'Ukraine',
+    TR: 'Turkey',
+    IL: 'Israel',
+    AE: 'United Arab Emirates',
+    SA: 'Saudi Arabia',
+    ZA: 'South Africa',
+    AR: 'Argentina',
+    CL: 'Chile',
+    CO: 'Colombia',
+    PE: 'Peru',
+    VE: 'Venezuela',
+    TH: 'Thailand',
+    VN: 'Vietnam',
+    PH: 'Philippines',
+    MY: 'Malaysia',
+    ID: 'Indonesia',
+    TW: 'Taiwan',
+    EG: 'Egypt',
+    PK: 'Pakistan',
+    BD: 'Bangladesh',
+    NG: 'Nigeria',
+    KE: 'Kenya',
+    GH: 'Ghana',
     // Add more as needed
   };
 

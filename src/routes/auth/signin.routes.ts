@@ -21,6 +21,8 @@ import { createAuthToken } from '../../services/auth-token.service';
 import { trustDevice, isDeviceTrusted } from '../../services/trusted-device.service';
 import { createDeviceHash, parseUserAgent } from '../../services/device-fingerprint.service';
 import { createSession } from '../../services/session.service';
+import { checkLoginForAlerts } from '../../services/login-alert.service';
+import { getLocationFromIP } from '../../services/geolocation.service';
 
 const app = new Hono();
 
@@ -232,6 +234,7 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
 
   // Create session record for session management
   const deviceInfo = parseUserAgent(userAgent);
+  const location = getLocationFromIP(ipAddress);
   await createSession({
     userId: user.id,
     refreshToken: authResult.session.refresh_token,
@@ -239,6 +242,17 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
     browser: deviceInfo.browser,
     os: deviceInfo.os,
     ipAddress: ipAddress || undefined,
+    locationCity: location?.city,
+    locationCountry: location?.country,
+  });
+
+  // Check for login alerts (new device, location, browser) - non-blocking
+  checkLoginForAlerts({
+    userId: user.id,
+    ipAddress: ipAddress || undefined,
+    userAgent: userAgent || undefined,
+  }).catch((err) => {
+    console.error('Failed to check login alerts:', err);
   });
 
   // Get user's tenants

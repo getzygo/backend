@@ -19,6 +19,7 @@ import { users, auditLogs } from '../../db/schema';
 import { verifyPassword, hashPassword } from '../../services/user.service';
 import { updateAuthUser, signOut } from '../../services/supabase.service';
 import { invalidateAuthToken } from '../../services/auth-token.service';
+import { sendPasswordChangedEmail } from '../../services/email.service';
 
 const app = new Hono();
 
@@ -126,6 +127,14 @@ app.post('/', authMiddleware, zValidator('json', changePasswordSchema), async (c
     ipAddress: ipAddress || undefined,
     userAgent: userAgent || undefined,
     status: 'success',
+  });
+
+  // Send password changed notification email (ALWAYS_SEND - cannot be disabled)
+  sendPasswordChangedEmail(user.email, user.firstName || undefined, {
+    ipAddress: ipAddress || undefined,
+    deviceInfo: userAgent || undefined,
+  }).catch((err) => {
+    console.error('Failed to send password changed email:', err);
   });
 
   // Invalidate current session - user must re-login with new password

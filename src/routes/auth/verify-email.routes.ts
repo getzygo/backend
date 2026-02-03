@@ -10,7 +10,7 @@ import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { authMiddleware } from '../../middleware/auth.middleware';
-import { emailService } from '../../services/email.service';
+import { emailService, sendWelcomeEmail } from '../../services/email.service';
 import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
 
@@ -98,6 +98,11 @@ app.post('/public', zValidator('json', verifyEmailPublicSchema), async (c) => {
     status: 'success',
   });
 
+  // Send welcome email (non-blocking)
+  sendWelcomeEmail(normalizedEmail, user.firstName || undefined).catch((err) => {
+    console.error('Failed to send welcome email:', err);
+  });
+
   return c.json({
     verified: true,
   });
@@ -157,6 +162,11 @@ app.post('/', authMiddleware, zValidator('json', verifyEmailSchema), async (c) =
     ipAddress: ipAddress || undefined,
     userAgent: userAgent || undefined,
     status: 'success',
+  });
+
+  // Send welcome email (non-blocking)
+  sendWelcomeEmail(user.email, user.firstName || undefined).catch((err) => {
+    console.error('Failed to send welcome email:', err);
   });
 
   return c.json({

@@ -18,6 +18,7 @@ import { getRedis, REDIS_KEYS, REDIS_TTL } from '../../db/redis';
 import { getUserByEmail, hashPassword } from '../../services/user.service';
 import { updateAuthUser } from '../../services/supabase.service';
 import { getEnv } from '../../config/env';
+import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../../services/email.service';
 
 const app = new Hono();
 
@@ -123,46 +124,9 @@ app.post('/forgot-password', zValidator('json', forgotPasswordSchema), async (c)
     createdAt: Date.now(),
   }));
 
-  // Send email with code
+  // Send email with code using email service
   try {
-    if (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS) {
-      const nodemailer = await import('nodemailer');
-
-      const transporter = nodemailer.createTransport({
-        host: env.SMTP_HOST,
-        port: env.SMTP_PORT,
-        secure: env.SMTP_SECURE,
-        auth: {
-          user: env.SMTP_USER,
-          pass: env.SMTP_PASS,
-        },
-      });
-
-      const name = user.firstName || 'there';
-
-      await transporter.sendMail({
-        from: `"Zygo" <${env.EMAIL_FROM}>`,
-        to: email,
-        subject: 'Reset your password - Zygo',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2>Reset your password</h2>
-            <p>Hi ${name},</p>
-            <p>We received a request to reset your password. Use this code to reset it:</p>
-            <div style="background: #f4f4f4; padding: 20px; text-align: center; font-size: 32px; letter-spacing: 8px; font-weight: bold; margin: 20px 0;">
-              ${code}
-            </div>
-            <p>This code will expire in 1 hour.</p>
-            <p>If you didn't request a password reset, you can safely ignore this email. Your password will not be changed.</p>
-            <p>Best,<br>The Zygo Team</p>
-          </div>
-        `,
-        text: `Hi ${name},\n\nWe received a request to reset your password. Use this code to reset it: ${code}\n\nThis code will expire in 1 hour.\n\nIf you didn't request a password reset, you can safely ignore this email.\n\nBest,\nThe Zygo Team`,
-      });
-    } else {
-      // Development mode - log the code
-      console.log(`[DEV] Password reset code for ${email}: ${code}`);
-    }
+    await sendPasswordResetEmail(email, code, user.firstName || undefined);
   } catch (error) {
     console.error('Failed to send password reset email:', error);
     // Still return success - don't reveal email sending failure
@@ -390,45 +354,13 @@ app.post('/reset-password', zValidator('json', resetPasswordSchema), async (c) =
     status: 'success',
   });
 
-  // Send confirmation email
+  // Send confirmation email (ALWAYS_SEND - cannot be disabled)
   try {
-    const env = getEnv();
-
-    if (env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS) {
-      const nodemailer = await import('nodemailer');
-
-      const transporter = nodemailer.createTransport({
-        host: env.SMTP_HOST,
-        port: env.SMTP_PORT,
-        secure: env.SMTP_SECURE,
-        auth: {
-          user: env.SMTP_USER,
-          pass: env.SMTP_PASS,
-        },
-      });
-
-      const name = user.firstName || 'there';
-
-      await transporter.sendMail({
-        from: `"Zygo" <${env.EMAIL_FROM}>`,
-        to: email,
-        subject: 'Your password has been reset - Zygo',
-        html: `
-          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
-            <h2>Password Reset Successful</h2>
-            <p>Hi ${name},</p>
-            <p>Your password has been successfully reset.</p>
-            <p>If you did not make this change, please contact our support team immediately.</p>
-            <p>Best,<br>The Zygo Team</p>
-          </div>
-        `,
-        text: `Hi ${name},\n\nYour password has been successfully reset.\n\nIf you did not make this change, please contact our support team immediately.\n\nBest,\nThe Zygo Team`,
-      });
-    } else {
-      console.log(`[DEV] Password reset confirmation would be sent to ${email}`);
-    }
+    await sendPasswordChangedEmail(email, user.firstName || undefined, {
+      ipAddress: ipAddress || undefined,
+    });
   } catch (error) {
-    console.error('Failed to send password reset confirmation email:', error);
+    console.error('Failed to send password changed confirmation email:', error);
     // Non-blocking - password was still reset
   }
 
