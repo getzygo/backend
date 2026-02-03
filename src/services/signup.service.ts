@@ -56,8 +56,8 @@ export interface SignupParams {
   password: string;
   firstName: string;
   lastName: string;
-  phone: string;
-  phoneCountryCode: string;
+  phone?: string;
+  phoneCountryCode?: string;
   country: string; // ISO 3166-1 alpha-2
   city: string;
 
