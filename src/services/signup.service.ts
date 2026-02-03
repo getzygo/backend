@@ -454,6 +454,7 @@ export async function signupWithOAuth(params: {
   supabaseUserId: string; // Supabase auth.users UUID - MUST match for API auth to work
   providerUserId: string; // External OAuth provider's user ID (e.g., Google's sub)
   email: string;
+  password?: string; // Password set during OAuth signup flow
   firstName?: string;
   lastName?: string;
   avatarUrl?: string; // OAuth provider avatar URL
@@ -489,6 +490,7 @@ export async function signupWithOAuth(params: {
     supabaseUserId,
     providerUserId,
     email,
+    password,
     firstName,
     lastName,
     avatarUrl,
@@ -513,6 +515,9 @@ export async function signupWithOAuth(params: {
   if (!termsAccepted) {
     throw new Error('You must accept the terms of service');
   }
+
+  // Hash password if provided (OAuth users can set a password during signup)
+  const passwordHash = password ? await hashPassword(password) : '';
 
   const normalizedEmail = email.toLowerCase().trim();
   const normalizedSlug = workspaceSubdomain.toLowerCase().trim();
@@ -564,7 +569,7 @@ export async function signupWithOAuth(params: {
         email: normalizedEmail,
         emailVerified: true, // OAuth verified the email
         emailVerifiedVia: provider, // Track which provider verified the email
-        passwordHash: '', // No password for OAuth users
+        passwordHash, // Password set during OAuth signup flow (or empty if not provided)
         firstName: firstName || null,
         lastName: lastName || null,
         displayName: firstName && lastName ? `${firstName} ${lastName}` : firstName || undefined,
