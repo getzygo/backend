@@ -131,6 +131,9 @@ export async function getUserSessions(
     orderBy: desc(userSessions.lastActiveAt),
   });
 
+  // If no current token provided, mark the most recent session as current
+  const mostRecentId = sessions.length > 0 ? sessions[0].id : null;
+
   return sessions.map((session) => ({
     id: session.id,
     deviceName: session.deviceName,
@@ -139,7 +142,9 @@ export async function getUserSessions(
     ipAddress: session.ipAddress,
     locationCity: session.locationCity,
     locationCountry: session.locationCountry,
-    isCurrent: currentTokenHash ? session.tokenHash === currentTokenHash : session.isCurrent,
+    isCurrent: currentTokenHash
+      ? session.tokenHash === currentTokenHash
+      : session.id === mostRecentId, // Fall back to most recent session
     lastActiveAt: session.lastActiveAt,
     createdAt: session.createdAt,
   }));
