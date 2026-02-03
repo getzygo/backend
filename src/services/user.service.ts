@@ -5,7 +5,7 @@
  */
 
 import { eq, and } from 'drizzle-orm';
-import * as bcrypt from 'bcrypt';
+import * as bcrypt from 'bcryptjs';
 import { getDb } from '../db/client';
 import { users, socialLogins, auditLogs } from '../db/schema';
 import type { User, NewUser, NewSocialLogin, NewAuditLog } from '../db/schema';
