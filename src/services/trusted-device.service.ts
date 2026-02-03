@@ -5,7 +5,7 @@
  * Trusted devices can skip MFA verification for a configurable period (default 30 days).
  */
 
-import { eq, and, gt } from 'drizzle-orm';
+import { eq, and, gt, lt } from 'drizzle-orm';
 import { getDb } from '../db/client';
 import { trustedDevices, auditLogs } from '../db/schema';
 import { createDeviceHash, parseUserAgent } from './device-fingerprint.service';
@@ -244,10 +244,8 @@ export async function cleanupExpiredTrustedDevices(): Promise<number> {
   await db
     .delete(trustedDevices)
     .where(
-      and(
-        // Use less than comparison
-        gt(now, trustedDevices.trustedUntil)
-      )
+      // Device has expired: trustedUntil < now
+      lt(trustedDevices.trustedUntil, now)
     );
 
   return 0; // Drizzle doesn't easily return affected row count
