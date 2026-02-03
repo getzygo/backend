@@ -8,6 +8,7 @@
 import { getDb } from '../db/client';
 import { auditLogs, type NewAuditLog } from '../db/schema';
 import { eq, and, desc, gte, lte, sql } from 'drizzle-orm';
+import { logger } from '../utils/logger';
 
 // ============================================================================
 // Audit Action Types
@@ -122,7 +123,7 @@ export async function createAuditLog(entry: AuditLogEntry): Promise<void> {
     });
   } catch (error) {
     // Log error but don't throw - audit logging should not break the main flow
-    console.error('Failed to create audit log:', error);
+    logger.error('Failed to create audit log:', error);
   }
 }
 

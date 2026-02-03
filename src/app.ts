@@ -6,17 +6,18 @@
 
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { logger } from 'hono/logger';
+import { logger as honoLogger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
 import { secureHeaders } from 'hono/secure-headers';
 import routes from './routes';
 import { getEnv } from './config/env';
+import { logger } from './utils/logger';
 
 export function createApp() {
   const app = new Hono();
 
   // Global middleware
-  app.use('*', logger());
+  app.use('*', honoLogger());
   app.use('*', prettyJSON());
   app.use('*', secureHeaders());
 
@@ -61,7 +62,7 @@ export function createApp() {
 
   // Global error handler
   app.onError((err, c) => {
-    console.error('Unhandled error:', err);
+    logger.error('Unhandled error:', err);
 
     return c.json(
       {

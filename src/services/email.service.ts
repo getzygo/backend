@@ -9,6 +9,7 @@ import { randomInt } from 'crypto';
 import { render } from '@react-email/render';
 import { getRedis, REDIS_KEYS, REDIS_TTL } from '../db/redis';
 import { getEnv } from '../config/env';
+import { logger } from '../utils/logger';
 import type { ReactElement } from 'react';
 
 // Import templates
@@ -82,9 +83,7 @@ async function sendEmail({ to, subject, template, headers = {} }: SendEmailOptio
     const text = await render(template, { plainText: true });
 
     if (!isSmtpConfigured()) {
-      console.warn('[DEV] SMTP not configured, skipping email send');
-      console.log(`[DEV] Would send email to ${to}: ${subject}`);
-      console.log(`[DEV] Plain text preview:\n${text.substring(0, 500)}...`);
+      logger.dev(`SMTP not configured, skipping email to ${to}: ${subject}`);
       return { sent: true };
     }
 
@@ -104,7 +103,7 @@ async function sendEmail({ to, subject, template, headers = {} }: SendEmailOptio
 
     return { sent: true };
   } catch (error) {
-    console.error('Failed to send email:', error);
+    logger.error('Failed to send email:', error);
     return {
       sent: false,
       error: error instanceof Error ? error.message : 'Failed to send email',
@@ -161,7 +160,7 @@ export async function sendVerificationEmail(
   await storeCode(email, code);
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] Email verification code for ${email}: ${code}`);
+    logger.dev(`Email verification code for ${email}: ${code}`);
     return { sent: true, expiresIn: REDIS_TTL.EMAIL_CODE, code };
   }
 
@@ -229,7 +228,7 @@ export async function sendPasswordResetEmail(
   firstName?: string
 ): Promise<SendEmailResult> {
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] Password reset code for ${email}: ${code}`);
+    logger.dev(`Password reset code for ${email}: ${code}`);
     return { sent: true };
   }
 
@@ -255,7 +254,7 @@ export async function sendPasswordChangedEmail(
   const baseUrl = details?.appUrl || 'https://app.getzygo.com';
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] Password changed notification would be sent to ${email}`);
+    logger.dev(` Password changed notification would be sent to ${email}`);
     return { sent: true };
   }
 
@@ -283,7 +282,7 @@ export async function sendWelcomeEmail(
   const baseUrl = appUrl || 'https://app.getzygo.com';
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] Welcome email would be sent to ${email}`);
+    logger.dev(` Welcome email would be sent to ${email}`);
     return { sent: true };
   }
 
@@ -317,7 +316,7 @@ export async function sendLoginAlertEmail(
   const baseUrl = details.appUrl || 'https://app.getzygo.com';
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] Login alert would be sent to ${email}:`, details);
+    logger.dev(` Login alert would be sent to ${email}:`, details);
     return { sent: true };
   }
 
@@ -359,7 +358,7 @@ export async function sendMfaEnabledEmail(
   const baseUrl = appUrl || 'https://app.getzygo.com';
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] MFA enabled email would be sent to ${email}`);
+    logger.dev(` MFA enabled email would be sent to ${email}`);
     return { sent: true };
   }
 
@@ -389,7 +388,7 @@ export async function sendMfaDisabledEmail(
   const baseUrl = details?.appUrl || 'https://app.getzygo.com';
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] MFA disabled email would be sent to ${email}`);
+    logger.dev(` MFA disabled email would be sent to ${email}`);
     return { sent: true };
   }
 
@@ -424,7 +423,7 @@ export async function sendSessionRevokedEmail(
   const baseUrl = details.appUrl || 'https://app.getzygo.com';
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] Session revoked email would be sent to ${email}:`, details);
+    logger.dev(` Session revoked email would be sent to ${email}:`, details);
     return { sent: true };
   }
 
@@ -458,7 +457,7 @@ export async function sendBackupCodesRegeneratedEmail(
   const baseUrl = details?.appUrl || 'https://app.getzygo.com';
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] Backup codes regenerated email would be sent to ${email}`);
+    logger.dev(` Backup codes regenerated email would be sent to ${email}`);
     return { sent: true };
   }
 
@@ -494,7 +493,7 @@ export async function sendMfaReminderEmail(
   const baseUrl = options.appUrl || 'https://app.getzygo.com';
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] MFA reminder email would be sent to ${email}:`, options);
+    logger.dev(` MFA reminder email would be sent to ${email}:`, options);
     return { sent: true };
   }
 
@@ -531,7 +530,7 @@ export async function sendPhoneReminderEmail(
   const baseUrl = options.appUrl || 'https://app.getzygo.com';
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] Phone reminder email would be sent to ${email}:`, options);
+    logger.dev(` Phone reminder email would be sent to ${email}:`, options);
     return { sent: true };
   }
 
@@ -569,7 +568,7 @@ export async function sendTrialReminderEmail(
   const baseUrl = options.appUrl || 'https://app.getzygo.com';
 
   if (!isSmtpConfigured()) {
-    console.log(`[DEV] Trial reminder email would be sent to ${email}:`, options);
+    logger.dev(` Trial reminder email would be sent to ${email}:`, options);
     return { sent: true };
   }
 

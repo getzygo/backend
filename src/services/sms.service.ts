@@ -9,6 +9,7 @@
 import { randomInt } from 'crypto';
 import { getRedis, REDIS_KEYS, REDIS_TTL } from '../db/redis';
 import { getEnv } from '../config/env';
+import { logger } from '../utils/logger';
 
 /**
  * Generate a cryptographically secure 6-digit verification code
@@ -126,7 +127,7 @@ async function sendViaVerifyApi(phone: string): Promise<{ sent: boolean; expires
     // Twilio Verify codes expire in 10 minutes by default
     return { sent: true, expiresIn: 600 };
   } catch (error) {
-    console.error('Twilio Verify API error:', error);
+    logger.error('Twilio Verify API error:', error);
     return {
       sent: false,
       expiresIn: 0,
@@ -157,7 +158,7 @@ async function verifyViaVerifyApi(phone: string, code: string): Promise<{ verifi
 
     return { verified: false, error: 'Invalid code' };
   } catch (error) {
-    console.error('Twilio Verify check error:', error);
+    logger.error('Twilio Verify check error:', error);
     return {
       verified: false,
       error: error instanceof Error ? error.message : 'Verification failed',
@@ -184,7 +185,7 @@ async function sendViaDirectSms(phone: string): Promise<{ sent: boolean; expires
 
     return { sent: true, expiresIn: REDIS_TTL.PHONE_CODE };
   } catch (error) {
-    console.error('Twilio SMS error:', error);
+    logger.error('Twilio SMS error:', error);
     return {
       sent: false,
       expiresIn: 0,
@@ -220,10 +221,10 @@ export async function sendVerificationSms(
   }
 
   // Development mode - generate code locally
-  console.warn('Twilio not configured, using development mode');
+  logger.dev('Twilio not configured, using development mode');
   const code = generateCode();
   await storeCode(phone, code);
-  console.log(`[DEV] Phone verification code for ${phone}: ${code}`);
+  logger.dev(`Phone verification code for ${phone}: ${code}`);
   return { sent: true, expiresIn: REDIS_TTL.PHONE_CODE };
 }
 
