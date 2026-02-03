@@ -16,6 +16,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
+import crypto from 'crypto';
 import { oauthService } from '../../services/oauth.service';
 import {
   userService,
@@ -35,6 +36,8 @@ import { getDb } from '../../db/client';
 import { users, auditLogs } from '../../db/schema';
 import type { User } from '../../db/schema';
 import { createAuthToken } from '../../services/auth-token.service';
+import { parseUserAgent } from '../../services/device-fingerprint.service';
+import { createSession } from '../../services/session.service';
 
 const app = new Hono();
 
@@ -222,6 +225,19 @@ app.post('/signin', async (c) => {
           updatedAt: new Date(),
         })
         .where(eq(users.id, user.id));
+
+      // Create session record for session management
+      // For OAuth implicit flow, generate a session token since we don't have the refresh token
+      const deviceInfo = parseUserAgent(userAgent);
+      const oauthSessionToken = crypto.randomBytes(32).toString('hex');
+      await createSession({
+        userId: user.id,
+        refreshToken: oauthSessionToken, // Use generated token for OAuth sessions
+        deviceName: deviceInfo.deviceName,
+        browser: deviceInfo.browser,
+        os: deviceInfo.os,
+        ipAddress: ipAddress || undefined,
+      });
 
       // Audit log
       await db.insert(auditLogs).values({
@@ -442,6 +458,18 @@ app.post('/signin', async (c) => {
         updatedAt: new Date(),
       })
       .where(eq(users.id, user.id));
+
+    // Create session record for session management
+    const deviceInfoAuthCode = parseUserAgent(userAgent);
+    const authCodeSessionToken = crypto.randomBytes(32).toString('hex');
+    await createSession({
+      userId: user.id,
+      refreshToken: authCodeSessionToken,
+      deviceName: deviceInfoAuthCode.deviceName,
+      browser: deviceInfoAuthCode.browser,
+      os: deviceInfoAuthCode.os,
+      ipAddress: ipAddress || undefined,
+    });
 
     // Get user's tenants
     const userTenants = await getUserTenants(user.id);
@@ -917,6 +945,19 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
           .where(eq(users.id, existingUser.id));
       }
 
+      // Create session record for session management
+      const existingUserDeviceInfo = parseUserAgent(userAgent);
+      const existingUserSessionToken = crypto.randomBytes(32).toString('hex');
+      await createSession({
+        userId: existingUser.id,
+        tenantId: tenantResult.tenant.id,
+        refreshToken: existingUserSessionToken,
+        deviceName: existingUserDeviceInfo.deviceName,
+        browser: existingUserDeviceInfo.browser,
+        os: existingUserDeviceInfo.os,
+        ipAddress: ipAddress || undefined,
+      });
+
       // Generate secure opaque auth token stored in Redis
       const authToken = await createAuthToken({
         userId: existingUser.id,
@@ -1013,6 +1054,19 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       termsAccepted: body.terms_accepted ?? true,
       ipAddress: ipAddress || undefined,
       userAgent: userAgent || undefined,
+    });
+
+    // Create session record for session management
+    const signupDeviceInfo = parseUserAgent(userAgent);
+    const signupSessionToken = crypto.randomBytes(32).toString('hex');
+    await createSession({
+      userId: result.user.id,
+      tenantId: result.tenant.id,
+      refreshToken: signupSessionToken,
+      deviceName: signupDeviceInfo.deviceName,
+      browser: signupDeviceInfo.browser,
+      os: signupDeviceInfo.os,
+      ipAddress: ipAddress || undefined,
     });
 
     // Generate secure opaque auth token stored in Redis

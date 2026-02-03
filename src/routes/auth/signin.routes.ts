@@ -19,7 +19,8 @@ import { users, auditLogs } from '../../db/schema';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { createAuthToken } from '../../services/auth-token.service';
 import { trustDevice, isDeviceTrusted } from '../../services/trusted-device.service';
-import { createDeviceHash } from '../../services/device-fingerprint.service';
+import { createDeviceHash, parseUserAgent } from '../../services/device-fingerprint.service';
+import { createSession } from '../../services/session.service';
 
 const app = new Hono();
 
@@ -228,6 +229,17 @@ app.post('/', zValidator('json', signinSchema), async (c) => {
       updatedAt: new Date(),
     })
     .where(eq(users.id, user.id));
+
+  // Create session record for session management
+  const deviceInfo = parseUserAgent(userAgent);
+  await createSession({
+    userId: user.id,
+    refreshToken: authResult.session.refresh_token,
+    deviceName: deviceInfo.deviceName,
+    browser: deviceInfo.browser,
+    os: deviceInfo.os,
+    ipAddress: ipAddress || undefined,
+  });
 
   // Get user's tenants
   const userTenants = await getUserTenants(user.id);
