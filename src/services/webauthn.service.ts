@@ -26,7 +26,21 @@ import type { Passkey, NewPasskey } from '../db/schema/security';
 // WebAuthn configuration
 const RP_NAME = process.env.WEBAUTHN_RP_NAME || 'Zygo';
 const RP_ID = process.env.WEBAUTHN_RP_ID || 'zygo.tech';
-const RP_ORIGIN = process.env.WEBAUTHN_RP_ORIGIN || 'https://getzygo.com';
+
+/**
+ * Get allowed origins for WebAuthn verification.
+ * Allows any *.zygo.tech subdomain and getzygo.com
+ */
+function getAllowedOrigins(requestOrigin?: string): string[] {
+  const origins = ['https://getzygo.com'];
+
+  // Add the request origin if it's a valid zygo.tech subdomain
+  if (requestOrigin && requestOrigin.match(/^https:\/\/[a-z0-9-]+\.zygo\.tech$/)) {
+    origins.push(requestOrigin);
+  }
+
+  return origins;
+}
 
 // Challenge expiration (5 minutes)
 const CHALLENGE_EXPIRY_MINUTES = 5;
@@ -138,7 +152,8 @@ export async function verifyRegistration(
   response: RegistrationResponseJSON,
   passkeyyName?: string,
   ipAddress?: string,
-  userAgent?: string
+  userAgent?: string,
+  requestOrigin?: string
 ): Promise<{ success: boolean; passkeyId?: string; error?: string }> {
   const db = getDb();
 
@@ -152,7 +167,7 @@ export async function verifyRegistration(
     const verification = await verifyRegistrationResponse({
       response,
       expectedChallenge,
-      expectedOrigin: RP_ORIGIN,
+      expectedOrigin: getAllowedOrigins(requestOrigin),
       expectedRPID: RP_ID,
     });
 
@@ -254,7 +269,8 @@ export async function generateAuthenticationOpts(
 export async function verifyAuthentication(
   response: AuthenticationResponseJSON,
   ipAddress?: string,
-  userAgent?: string
+  userAgent?: string,
+  requestOrigin?: string
 ): Promise<{
   success: boolean;
   userId?: string;
@@ -285,7 +301,7 @@ export async function verifyAuthentication(
     const verification = await verifyAuthenticationResponse({
       response,
       expectedChallenge,
-      expectedOrigin: RP_ORIGIN,
+      expectedOrigin: getAllowedOrigins(requestOrigin),
       expectedRPID: RP_ID,
       credential: {
         id: passkey.credentialId,

@@ -83,8 +83,9 @@ app.post('/register/verify', authMiddleware, zValidator('json', registerVerifySc
   const { response, name } = c.req.valid('json');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
+  const origin = c.req.header('origin');
 
-  const result = await verifyRegistration(user.id, response, name, ipAddress, userAgent);
+  const result = await verifyRegistration(user.id, response, name, ipAddress, userAgent, origin);
 
   if (!result.success) {
     const errorMessages: Record<string, string> = {
@@ -130,8 +131,9 @@ app.post('/authenticate/verify', zValidator('json', authVerifySchema), async (c)
   const { response } = c.req.valid('json');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
+  const origin = c.req.header('origin');
 
-  const result = await verifyAuthentication(response, ipAddress, userAgent);
+  const result = await verifyAuthentication(response, ipAddress, userAgent, origin);
 
   if (!result.success) {
     const errorMessages: Record<string, string> = {
