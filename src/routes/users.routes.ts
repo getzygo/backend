@@ -160,7 +160,7 @@ app.get('/me/avatar/file', authMiddleware, tenantMiddleware, requireTenantMember
     headers: {
       'Content-Type': contentType,
       'Content-Length': arrayBuffer.byteLength.toString(),
-      'Cache-Control': 'private, max-age=3600', // Cache for 1 hour
+      'Cache-Control': 'private, no-cache, must-revalidate', // Don't cache - avatar can change
       'X-Content-Type-Options': 'nosniff',
     },
   });
@@ -546,7 +546,7 @@ app.get('/:userId/avatar/file', authMiddleware, tenantMiddleware, requireTenantM
     headers: {
       'Content-Type': contentType,
       'Content-Length': arrayBuffer.byteLength.toString(),
-      'Cache-Control': 'private, max-age=3600', // Cache for 1 hour
+      'Cache-Control': 'private, no-cache, must-revalidate', // Don't cache - avatar can change
       'X-Content-Type-Options': 'nosniff',
     },
   });
