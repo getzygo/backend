@@ -45,7 +45,7 @@ import { randomBytes } from 'crypto';
 
 // Key for storing pending MFA sessions (OAuth flow)
 const OAUTH_MFA_KEY = 'oauth_mfa:';
-const OAUTH_MFA_TTL = 300; // 5 minutes
+const OAUTH_MFA_TTL = 600; // 10 minutes
 
 const app = new Hono();
 
@@ -288,11 +288,12 @@ app.post('/signin', async (c) => {
           });
 
           // Return MFA required response
+          // Include source=oauth so frontend knows which endpoint to call
           const targetSlug = targetTenant?.slug || 'app';
           return c.json({
             success: true,
             mfa_required: true,
-            redirect_url: `https://${targetSlug}.zygo.tech/mfa-verify?mfa_token=${mfaToken}`,
+            redirect_url: `https://${targetSlug}.zygo.tech/mfa-verify?mfa_token=${mfaToken}&source=oauth`,
             user: {
               id: user.id,
               email: user.email,

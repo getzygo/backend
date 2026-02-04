@@ -42,7 +42,7 @@ const verifyMfaSchema = z.object({
 
 // Key for storing pending MFA sessions
 const MAGIC_LINK_MFA_KEY = 'magic_link_mfa:';
-const MAGIC_LINK_MFA_TTL = 300; // 5 minutes
+const MAGIC_LINK_MFA_TTL = 600; // 10 minutes
 
 /**
  * POST /api/v1/auth/magic-link/send
@@ -357,7 +357,7 @@ app.post('/verify-mfa', zValidator('json', verifyMfaSchema), async (c) => {
     return c.json(
       {
         error: 'invalid_or_expired_token',
-        message: 'MFA session has expired. Please request a new magic link.',
+        message: 'MFA session has expired. Please sign in again.',
       },
       400
     );
