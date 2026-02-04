@@ -31,14 +31,17 @@ function getCookieOptions(overrides: Partial<CookieOptions> = {}): CookieOptions
   const env = getEnv();
   const isProduction = env.NODE_ENV === 'production';
 
+  // SECURITY: Do NOT set domain - cookies will be scoped to api.zygo.tech only
+  // This prevents cross-tenant cookie access (e.g., tenant1.zygo.tech cannot read tenant2's cookies)
+  // Cookies are still sent to API because requests from tenant apps go to api.zygo.tech
   return {
     path: '/',
     httpOnly: true,
     secure: isProduction, // HTTPS only in production
-    // Use None for cross-subdomain requests (e.g., demo.zygo.tech → api.zygo.tech)
+    // Use None for cross-origin requests (e.g., demo.zygo.tech → api.zygo.tech)
     // Requires Secure flag to be set
     sameSite: isProduction ? 'None' : 'Lax',
-    domain: isProduction ? '.zygo.tech' : undefined, // Allow cross-subdomain in production
+    // SECURITY: No domain = scoped to api.zygo.tech only (tenant isolation)
     ...overrides,
   };
 }
