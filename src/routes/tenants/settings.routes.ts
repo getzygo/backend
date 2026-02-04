@@ -289,8 +289,8 @@ app.patch(
 const updateLegalSettingsSchema = z.object({
   company_legal_name: z.string().max(200).optional().nullable(),
   business_type: z.string().max(30).optional().nullable(),
-  incorporation_date: z.string().datetime().optional().nullable(),
-  country_of_incorporation: z.string().length(2).optional().nullable(),
+  incorporation_date: z.string().optional().nullable(), // Accept any date string format
+  country_of_incorporation: z.string().max(2).optional().nullable(),
   registration_number: z.string().max(50).optional().nullable(),
   tax_id: z.string().max(50).optional().nullable(),
   vat_number: z.string().max(30).optional().nullable(),
