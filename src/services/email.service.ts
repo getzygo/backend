@@ -90,6 +90,13 @@ export async function sendEmail({ to, subject, template, headers = {} }: SendEma
     const html = await render(template);
     const text = await render(template, { plainText: true });
 
+    console.log(`[Email] Rendered "${subject}": html=${html.length} chars, text=${text.length} chars`);
+    console.log(`[Email] HTML preview (first 500 chars): ${html.substring(0, 500)}`);
+    console.log(`[Email] HTML end (last 200 chars): ${html.substring(html.length - 200)}`);
+    if (html.length < 100) {
+      console.warn(`[Email] WARNING: HTML body is suspiciously short (${html.length} chars):`, html);
+    }
+
     if (!isSmtpConfigured()) {
       logger.dev(`SMTP not configured, skipping email to ${to}: ${subject}`);
       return { sent: true };

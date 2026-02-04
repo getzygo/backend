@@ -283,6 +283,89 @@ export async function createTenant(params: {
     await db.insert(rolePermissions).values(rolePermissionValues);
   }
 
+  // Create default system roles
+  const defaultRoles = [
+    { name: 'Admin', slug: 'admin', description: 'Full access to all features and settings', hierarchyLevel: 10, isProtected: true },
+    { name: 'Billing Admin', slug: 'billing_admin', description: 'Manage billing, subscriptions, and invoices', hierarchyLevel: 20, isProtected: true },
+    { name: 'Developer', slug: 'developer', description: 'Can create and manage workflows, agents, and integrations', hierarchyLevel: 30, isProtected: false },
+    { name: 'Member', slug: 'member', description: 'Standard access to use workflows and view dashboards', hierarchyLevel: 40, isProtected: false },
+    { name: 'Viewer', slug: 'viewer', description: 'Read-only access to workflows and dashboards', hierarchyLevel: 50, isProtected: false },
+  ];
+
+  // Permission key sets per role
+  const rolePermissionKeys: Record<string, string[] | 'all_except_delete_tenant'> = {
+    admin: 'all_except_delete_tenant',
+    billing_admin: [
+      // All billing permissions
+      ...allPermissions.filter((p) => p.category === 'billing').map((p) => p.key),
+      'canViewUsers', 'canInviteUsers', 'canViewRoles', 'canViewTenantSettings', 'canViewSecuritySettings', 'canManageLicenses',
+    ],
+    developer: [
+      // All permissions in infrastructure & development categories
+      ...allPermissions
+        .filter((p) => ['ai', 'workflows', 'servers', 'volumes', 'networks', 'firewalls', 'loadbalancers', 'dns', 'snapshots', 'floatingips', 'secrets', 'monitoring', 'documentation', 'webhooks', 'cloud', 'notifications'].includes(p.category))
+        .map((p) => p.key),
+      'canViewUsers', 'canViewRoles', 'canViewBillingOverview', 'canViewTenantSettings', 'canViewSecuritySettings',
+    ],
+    member: [
+      'canViewAIComponents', 'canViewAIAgents', 'canViewNodes', 'canViewTemplates', 'canViewAIMetrics', 'canAccessAIAPI',
+      'canExecuteWorkflows', 'canViewWorkflows', 'canViewWorkflowLogs',
+      'canViewServers', 'canViewServerMetrics', 'canViewVolumes', 'canViewNetworks', 'canViewFirewalls',
+      'canViewLoadBalancers', 'canViewDNSZones', 'canViewSnapshots', 'canViewFloatingIPs',
+      'canViewSecrets', 'canViewDashboards', 'canViewLogs', 'canViewDocumentation',
+      'canViewWebhooks', 'canViewWebhookLogs', 'canViewCloudProviders',
+      'canViewUsers', 'canViewRoles', 'canViewBillingOverview', 'canViewTenantSettings', 'canManageNotifications',
+    ],
+    viewer: [
+      'canViewAIComponents', 'canViewAIAgents', 'canViewNodes', 'canViewTemplates', 'canViewAIMetrics',
+      'canViewWorkflows', 'canViewWorkflowLogs',
+      'canViewServers', 'canViewServerMetrics', 'canViewVolumes', 'canViewNetworks', 'canViewFirewalls',
+      'canViewLoadBalancers', 'canViewDNSZones', 'canViewSnapshots', 'canViewFloatingIPs',
+      'canViewDashboards', 'canViewLogs', 'canViewDocumentation', 'canViewWebhooks',
+      'canViewCloudProviders', 'canViewUsers', 'canViewRoles', 'canViewBillingOverview', 'canViewTenantSettings',
+    ],
+  };
+
+  for (const roleDef of defaultRoles) {
+    const [role] = await db
+      .insert(roles)
+      .values({
+        tenantId: tenant.id,
+        name: roleDef.name,
+        slug: roleDef.slug,
+        description: roleDef.description,
+        hierarchyLevel: roleDef.hierarchyLevel,
+        isSystem: true,
+        isProtected: roleDef.isProtected,
+        createdBy: ownerUserId,
+      })
+      .returning();
+
+    // Assign permissions to this role
+    const permKeys = rolePermissionKeys[roleDef.slug];
+    if (permKeys && allPermissions.length > 0) {
+      let permissionsToAssign: typeof allPermissions;
+
+      if (permKeys === 'all_except_delete_tenant') {
+        permissionsToAssign = allPermissions.filter((p) => p.key !== 'canDeleteTenant');
+      } else {
+        const keySet = new Set(permKeys);
+        permissionsToAssign = allPermissions.filter((p) => keySet.has(p.key));
+      }
+
+      if (permissionsToAssign.length > 0) {
+        await db.insert(rolePermissions).values(
+          permissionsToAssign.map((permission) => ({
+            roleId: role.id,
+            permissionId: permission.id,
+            tenantId: tenant.id,
+            grantedBy: ownerUserId,
+          }))
+        );
+      }
+    }
+  }
+
   // Create tenant membership for owner
   const [membership] = await db
     .insert(tenantMembers)

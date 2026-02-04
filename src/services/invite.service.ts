@@ -74,20 +74,25 @@ export async function createInvite(params: {
     };
   }
 
-  // Check if invite already exists and is pending
+  // Check if invite already exists for this email
   const existingInvite = await db.query.tenantInvites.findFirst({
     where: and(
       eq(tenantInvites.tenantId, tenantId),
       eq(tenantInvites.email, normalizedEmail),
-      eq(tenantInvites.status, 'pending')
     ),
   });
 
   if (existingInvite) {
-    return {
-      success: false,
-      error: 'An active invite already exists for this email address.',
-    };
+    if (existingInvite.status === 'pending') {
+      return {
+        success: false,
+        error: 'An active invite already exists for this email address.',
+      };
+    }
+    // Remove cancelled/expired/accepted invites so we can create a fresh one
+    await db
+      .delete(tenantInvites)
+      .where(eq(tenantInvites.id, existingInvite.id));
   }
 
   // Check if user is already a member

@@ -165,6 +165,10 @@ app.post('/', rateLimit(RATE_LIMITS.AUTH), zValidator('json', signupSchema), asy
       avatarSource: undefined,
       emailVerified: result.user.emailVerified,
       emailVerifiedVia: undefined,
+      // Auth method for lock screen re-auth
+      authMethod: 'password',
+      oauthProvider: null,
+      hasPassword: true,
       roleId: result.role.id,
       roleName: result.role.name,
       roleSlug: result.role.slug,
@@ -427,6 +431,10 @@ app.post('/create-workspace', zValidator('json', createWorkspaceSchema), async (
       avatarSource: user.avatarSource || undefined,
       emailVerified: user.emailVerified,
       emailVerifiedVia: user.emailVerifiedVia || undefined,
+      // Auth method for lock screen - preserve from existing user
+      authMethod: user.passwordHash ? 'password' : undefined,
+      oauthProvider: null, // Frontend preserves from original login
+      hasPassword: user.passwordHash !== null,
       roleId: tenantResult.ownerRole.id,
       roleName: tenantResult.ownerRole.name,
       roleSlug: tenantResult.ownerRole.slug,
