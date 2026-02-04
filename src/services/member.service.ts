@@ -134,17 +134,29 @@ export async function canAddMember(tenantId: string): Promise<{
 
 /**
  * Get all members of a tenant with their roles
+ * @param tenantId - The tenant ID
+ * @param statusFilter - Status filter: 'active' (default), 'suspended', 'all' (no filter)
  */
-export async function getTenantMembers(tenantId: string): Promise<
-  (TenantMember & { user: User; role: Role })[]
-> {
+export async function getTenantMembers(
+  tenantId: string,
+  statusFilter: 'active' | 'suspended' | 'all' = 'active'
+): Promise<(TenantMember & { user: User; role: Role })[]> {
   const db = getDb();
 
+  // Build where conditions
+  const conditions = [eq(tenantMembers.tenantId, tenantId)];
+
+  // Filter by status unless 'all' is requested
+  // Note: 'removed' members are fetched via getDeletedTenantMembers
+  if (statusFilter !== 'all') {
+    conditions.push(eq(tenantMembers.status, statusFilter));
+  } else {
+    // 'all' excludes 'removed' - those are fetched separately
+    conditions.push(sql`${tenantMembers.status} != 'removed'`);
+  }
+
   const members = await db.query.tenantMembers.findMany({
-    where: and(
-      eq(tenantMembers.tenantId, tenantId),
-      eq(tenantMembers.status, 'active')
-    ),
+    where: and(...conditions),
     with: {
       user: true,
       primaryRole: true,
@@ -405,11 +417,12 @@ export async function removeMember(params: {
   tenantId: string;
   memberId: string;
   removedBy: string;
+  reason?: string;
 }): Promise<{
   success: boolean;
   error?: string;
 }> {
-  const { tenantId, memberId, removedBy } = params;
+  const { tenantId, memberId, removedBy, reason } = params;
   const db = getDb();
 
   // Get the member
@@ -430,6 +443,7 @@ export async function removeMember(params: {
   }
 
   // Soft-delete: set status to 'removed'
+  // Note: deletedBy, deletionReason, and retentionExpiresAt would require schema additions
   await db
     .update(tenantMembers)
     .set({
@@ -443,14 +457,217 @@ export async function removeMember(params: {
   };
 }
 
+/**
+ * Get all deleted (removed) members of a tenant
+ */
+export async function getDeletedTenantMembers(tenantId: string): Promise<
+  (TenantMember & { user: User; role: Role })[]
+> {
+  const db = getDb();
+
+  const members = await db.query.tenantMembers.findMany({
+    where: and(
+      eq(tenantMembers.tenantId, tenantId),
+      eq(tenantMembers.status, 'removed')
+    ),
+    with: {
+      user: true,
+      primaryRole: true,
+    },
+    orderBy: [tenantMembers.updatedAt],
+  });
+
+  return members.map((m) => ({
+    ...m,
+    user: m.user as User,
+    role: m.primaryRole as Role,
+  }));
+}
+
+/**
+ * Suspend a member (blocks access but preserves data)
+ */
+export async function suspendMember(params: {
+  tenantId: string;
+  memberId: string;
+  suspendedBy: string;
+  reason?: string;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  member?: TenantMember;
+}> {
+  const { tenantId, memberId, suspendedBy, reason } = params;
+  const db = getDb();
+
+  // Get the member
+  const member = await getMemberById(tenantId, memberId);
+  if (!member) {
+    return {
+      success: false,
+      error: 'Member not found.',
+    };
+  }
+
+  // Cannot suspend the owner
+  if (member.isOwner) {
+    return {
+      success: false,
+      error: 'Cannot suspend the workspace owner.',
+    };
+  }
+
+  // Cannot suspend already suspended member
+  if (member.status === 'suspended') {
+    return {
+      success: false,
+      error: 'Member is already suspended.',
+    };
+  }
+
+  // Set status to suspended
+  const [updated] = await db
+    .update(tenantMembers)
+    .set({
+      status: 'suspended',
+      updatedAt: new Date(),
+    })
+    .where(eq(tenantMembers.id, memberId))
+    .returning();
+
+  return {
+    success: true,
+    member: updated,
+  };
+}
+
+/**
+ * Unsuspend a member (restore access)
+ */
+export async function unsuspendMember(params: {
+  tenantId: string;
+  memberId: string;
+  unsuspendedBy: string;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  member?: TenantMember;
+}> {
+  const { tenantId, memberId, unsuspendedBy } = params;
+  const db = getDb();
+
+  // Get the member
+  const member = await getMemberById(tenantId, memberId);
+  if (!member) {
+    return {
+      success: false,
+      error: 'Member not found.',
+    };
+  }
+
+  // Can only unsuspend suspended members
+  if (member.status !== 'suspended') {
+    return {
+      success: false,
+      error: 'Member is not suspended.',
+    };
+  }
+
+  // Set status back to active
+  const [updated] = await db
+    .update(tenantMembers)
+    .set({
+      status: 'active',
+      updatedAt: new Date(),
+    })
+    .where(eq(tenantMembers.id, memberId))
+    .returning();
+
+  return {
+    success: true,
+    member: updated,
+  };
+}
+
+/**
+ * Restore a removed member (within retention period)
+ */
+export async function restoreMember(params: {
+  tenantId: string;
+  memberId: string;
+  restoredBy: string;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  member?: TenantMember;
+}> {
+  const { tenantId, memberId, restoredBy } = params;
+  const db = getDb();
+
+  // Get the member (including removed ones)
+  const member = await db.query.tenantMembers.findFirst({
+    where: and(
+      eq(tenantMembers.id, memberId),
+      eq(tenantMembers.tenantId, tenantId)
+    ),
+    with: {
+      user: true,
+      primaryRole: true,
+    },
+  });
+
+  if (!member) {
+    return {
+      success: false,
+      error: 'Member not found.',
+    };
+  }
+
+  // Can only restore removed members
+  if (member.status !== 'removed') {
+    return {
+      success: false,
+      error: 'Member is not deleted and cannot be restored.',
+    };
+  }
+
+  // Check plan limits before restoring
+  const canAdd = await canAddMember(tenantId);
+  if (!canAdd.allowed) {
+    return {
+      success: false,
+      error: canAdd.reason || 'Cannot restore member due to plan limits.',
+    };
+  }
+
+  // Restore: set status back to active
+  const [updated] = await db
+    .update(tenantMembers)
+    .set({
+      status: 'active',
+      updatedAt: new Date(),
+    })
+    .where(eq(tenantMembers.id, memberId))
+    .returning();
+
+  return {
+    success: true,
+    member: updated,
+  };
+}
+
 export const memberService = {
   getPlanUserLimit,
   countTenantMembers,
   canAddMember,
   getTenantMembers,
+  getDeletedTenantMembers,
   getMemberById,
   getMemberByUserId,
   inviteMember,
   updateMemberRole,
+  suspendMember,
+  unsuspendMember,
   removeMember,
+  restoreMember,
 };

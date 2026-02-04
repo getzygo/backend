@@ -306,6 +306,105 @@ export const secondaryRoleAssignmentsRelations = relations(secondaryRoleAssignme
   }),
 }));
 
+/**
+ * Tenant Invites table - Pending invitations for users to join a tenant
+ * Invites can be for existing users or email addresses (who will sign up)
+ */
+export const tenantInvites = pgTable(
+  'tenant_invites',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id, { onDelete: 'cascade' }),
+
+    // Invitee information
+    email: varchar('email', { length: 255 }).notNull(),
+    // If user already exists in system
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+
+    // Role to assign upon acceptance
+    roleId: uuid('role_id')
+      .notNull()
+      .references(() => roles.id, { onDelete: 'cascade' }),
+
+    // Invite token for accepting via email link
+    token: varchar('token', { length: 64 }).notNull(),
+
+    // Invite status
+    status: varchar('status', { length: 20 }).notNull().default('pending'),
+    // 'pending' | 'accepted' | 'expired' | 'cancelled'
+
+    // Expiration (default 7 days)
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+
+    // Tracking
+    invitedBy: uuid('invited_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'set null' }),
+    invitedAt: timestamp('invited_at', { withTimezone: true }).notNull().defaultNow(),
+
+    // Acceptance tracking
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    // Member ID created upon acceptance
+    memberId: uuid('member_id').references(() => tenantMembers.id, { onDelete: 'set null' }),
+
+    // Cancellation tracking
+    cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    cancelledBy: uuid('cancelled_by').references(() => users.id, { onDelete: 'set null' }),
+
+    // Resend tracking
+    lastResentAt: timestamp('last_resent_at', { withTimezone: true }),
+    resendCount: integer('resend_count').notNull().default(0),
+
+    // Optional personal message from inviter
+    message: text('message'),
+
+    // Timestamps
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => ({
+    tenantEmailIdx: uniqueIndex('idx_tenant_invites_tenant_email').on(
+      table.tenantId,
+      table.email
+    ),
+    tenantIdx: index('idx_tenant_invites_tenant').on(table.tenantId),
+    emailIdx: index('idx_tenant_invites_email').on(table.email),
+    tokenIdx: uniqueIndex('idx_tenant_invites_token').on(table.token),
+    statusIdx: index('idx_tenant_invites_status').on(table.tenantId, table.status),
+    expiresIdx: index('idx_tenant_invites_expires').on(table.expiresAt),
+  })
+);
+
+// Tenant Invites Relations
+export const tenantInvitesRelations = relations(tenantInvites, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [tenantInvites.tenantId],
+    references: [tenants.id],
+  }),
+  user: one(users, {
+    fields: [tenantInvites.userId],
+    references: [users.id],
+  }),
+  role: one(roles, {
+    fields: [tenantInvites.roleId],
+    references: [roles.id],
+  }),
+  invitedByUser: one(users, {
+    fields: [tenantInvites.invitedBy],
+    references: [users.id],
+  }),
+  cancelledByUser: one(users, {
+    fields: [tenantInvites.cancelledBy],
+    references: [users.id],
+  }),
+  member: one(tenantMembers, {
+    fields: [tenantInvites.memberId],
+    references: [tenantMembers.id],
+  }),
+}));
+
 // Types
 export type Role = typeof roles.$inferSelect;
 export type NewRole = typeof roles.$inferInsert;
@@ -317,3 +416,5 @@ export type TenantMember = typeof tenantMembers.$inferSelect;
 export type NewTenantMember = typeof tenantMembers.$inferInsert;
 export type SecondaryRoleAssignment = typeof secondaryRoleAssignments.$inferSelect;
 export type NewSecondaryRoleAssignment = typeof secondaryRoleAssignments.$inferInsert;
+export type TenantInvite = typeof tenantInvites.$inferSelect;
+export type NewTenantInvite = typeof tenantInvites.$inferInsert;

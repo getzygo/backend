@@ -9,6 +9,7 @@ import authRoutes from './auth';
 import rolesRoutes from './roles';
 import tenantsRoutes from './tenants';
 import usersRoutes from './users.routes';
+import invitesRoutes from './invites.routes';
 import adminAuthRoutes from './admin/auth.routes';
 import notificationsRoutes from './notifications';
 import notificationPreferencesRoutes from './notifications/preferences.routes';
@@ -28,6 +29,11 @@ app.route('/auth', authRoutes);
 app.route('/roles', rolesRoutes);
 app.route('/tenants', tenantsRoutes);
 app.route('/users', usersRoutes);
+
+// Invite acceptance routes
+// GET /api/v1/invites/:token - Get invite details (public)
+// POST /api/v1/invites/:token/accept - Accept invite (auth required)
+app.route('/invites', invitesRoutes);
 
 // Admin panel routes (Phase 5)
 // POST /api/v1/admin/auth/signin - Admin signin

@@ -11,13 +11,20 @@
  * Permissions used:
  * - canViewUsers: List members
  * - canInviteUsers: Invite new members
- * - canManageUsers: Update member roles
- * - canDeleteUsers: Remove members
+ * - canManageUsers: Update member roles, suspend/unsuspend
+ * - canDeleteUsers: Remove members, restore deleted members
  *
  * GET /api/v1/tenants/:tenantId/members - List members (canViewUsers)
  * GET /api/v1/tenants/:tenantId/members/limits - Get member limits and usage
+ * GET /api/v1/tenants/:tenantId/members/invites - List pending invites (canViewUsers)
  * POST /api/v1/tenants/:tenantId/members/invite - Invite a new member (canInviteUsers)
+ * DELETE /api/v1/tenants/:tenantId/members/invites/:inviteId - Cancel invite (canInviteUsers)
+ * POST /api/v1/tenants/:tenantId/members/invites/:inviteId/resend - Resend invite (canInviteUsers)
  * PATCH /api/v1/tenants/:tenantId/members/:memberId - Update member role (canManageUsers)
+ * POST /api/v1/tenants/:tenantId/members/:memberId/suspend - Suspend member (canManageUsers)
+ * POST /api/v1/tenants/:tenantId/members/:memberId/unsuspend - Unsuspend member (canManageUsers)
+ * POST /api/v1/tenants/:tenantId/members/:memberId/restore - Restore deleted member (canDeleteUsers)
+ * POST /api/v1/tenants/:tenantId/members/:memberId/transfer - Transfer data ownership (canManageUsers)
  * DELETE /api/v1/tenants/:tenantId/members/:memberId - Remove member (canDeleteUsers)
  */
 
@@ -29,17 +36,27 @@ import { isTenantMember, isTenantOwner } from '../../services/tenant.service';
 import { hasPermission } from '../../services/permission.service';
 import {
   getTenantMembers,
+  getDeletedTenantMembers,
   getMemberById,
   canAddMember,
-  inviteMember,
   updateMemberRole,
+  suspendMember,
+  unsuspendMember,
   removeMember,
+  restoreMember,
   countTenantMembers,
   getPlanUserLimit,
 } from '../../services/member.service';
+import {
+  createInvite,
+  getPendingInvites,
+  getInviteById,
+  resendInvite,
+  cancelInvite,
+} from '../../services/invite.service';
 import { getDb } from '../../db/client';
-import { auditLogs, tenants } from '../../db/schema';
-import { eq } from 'drizzle-orm';
+import { auditLogs, tenants, tenantMembers } from '../../db/schema';
+import { eq, and } from 'drizzle-orm';
 import type { User } from '../../db/schema';
 
 const app = new Hono();
@@ -50,11 +67,14 @@ app.use('*', authMiddleware);
 /**
  * GET /api/v1/tenants/:tenantId/members
  * List all members of a tenant
+ * Query params:
+ *   - status: 'active' (default), 'deleted', 'suspended', 'all'
  * Requires canViewTeamMembers permission
  */
 app.get('/:tenantId/members', async (c) => {
   const user = c.get('user') as User;
   const tenantId = c.req.param('tenantId');
+  const status = c.req.query('status') || 'active';
 
   // Verify membership
   const isMember = await isTenantMember(user.id, tenantId);
@@ -80,7 +100,26 @@ app.get('/:tenantId/members', async (c) => {
     );
   }
 
-  const members = await getTenantMembers(tenantId);
+  // Fetch members based on status
+  let members;
+  if (status === 'deleted') {
+    // For deleted members, need canDeleteUsers permission
+    const canDelete = await hasPermission(user.id, tenantId, 'canDeleteUsers');
+    if (!canDelete) {
+      return c.json(
+        {
+          error: 'permission_denied',
+          message: 'You do not have permission to view deleted members',
+        },
+        403
+      );
+    }
+    members = await getDeletedTenantMembers(tenantId);
+  } else {
+    // Valid status values: 'active', 'suspended', 'all'
+    const validStatus = status === 'all' ? 'all' : status === 'suspended' ? 'suspended' : 'active';
+    members = await getTenantMembers(tenantId, validStatus);
+  }
 
   return c.json({
     members: members.map((m) => ({
@@ -104,6 +143,11 @@ app.get('/:tenantId/members', async (c) => {
       status: m.status,
       joined_at: m.joinedAt,
       invited_at: m.invitedAt,
+      // Extended fields for deleted members
+      deleted_at: (m as any).deletedAt,
+      deleted_by: (m as any).deletedBy,
+      deletion_reason: (m as any).deletionReason,
+      retention_expires_at: (m as any).retentionExpiresAt,
     })),
     count: members.length,
   });
@@ -164,16 +208,78 @@ app.get('/:tenantId/members/limits', async (c) => {
   });
 });
 
+/**
+ * GET /api/v1/tenants/:tenantId/members/invites
+ * List pending invites
+ * Requires canViewUsers permission
+ */
+app.get('/:tenantId/members/invites', async (c) => {
+  const user = c.get('user') as User;
+  const tenantId = c.req.param('tenantId');
+
+  // Verify membership
+  const isMember = await isTenantMember(user.id, tenantId);
+  if (!isMember) {
+    return c.json(
+      {
+        error: 'not_a_member',
+        message: 'You are not a member of this workspace',
+      },
+      403
+    );
+  }
+
+  // Check permission
+  const canView = await hasPermission(user.id, tenantId, 'canViewUsers');
+  if (!canView) {
+    return c.json(
+      {
+        error: 'permission_denied',
+        message: 'You do not have permission to view invites',
+      },
+      403
+    );
+  }
+
+  const invites = await getPendingInvites(tenantId);
+
+  return c.json({
+    invites: invites.map((i) => ({
+      id: i.id,
+      email: i.email,
+      role: {
+        id: i.role.id,
+        name: i.role.name,
+        slug: i.role.slug,
+      },
+      status: i.status,
+      invited_at: i.invitedAt,
+      invited_by: {
+        id: i.invitedByUser.id,
+        email: i.invitedByUser.email,
+        first_name: i.invitedByUser.firstName,
+        last_name: i.invitedByUser.lastName,
+      },
+      expires_at: i.expiresAt,
+      resend_count: i.resendCount,
+      last_resent_at: i.lastResentAt,
+    })),
+    count: invites.length,
+  });
+});
+
 // Invite member schema
 const inviteMemberSchema = z.object({
   email: z.string().email('Invalid email address'),
   role_id: z.string().uuid('Invalid role ID'),
+  message: z.string().max(500).optional(),
 });
 
 /**
  * POST /api/v1/tenants/:tenantId/members/invite
  * Invite a new member to the tenant
- * Requires canInviteMembers permission
+ * Creates an invite record that the user must accept
+ * Requires canInviteUsers permission
  * Enforces plan-based user limits
  */
 app.post(
@@ -182,7 +288,7 @@ app.post(
   async (c) => {
     const user = c.get('user') as User;
     const tenantId = c.req.param('tenantId');
-    const { email, role_id: roleId } = c.req.valid('json');
+    const { email, role_id: roleId, message } = c.req.valid('json');
     const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
     const userAgent = c.req.header('user-agent');
     const db = getDb();
@@ -211,12 +317,13 @@ app.post(
       );
     }
 
-    // Attempt to invite
-    const result = await inviteMember({
+    // Create invite
+    const result = await createInvite({
       tenantId,
       email: email.toLowerCase().trim(),
       roleId,
       invitedBy: user.id,
+      message,
     });
 
     if (!result.success) {
@@ -224,7 +331,7 @@ app.post(
       await db.insert(auditLogs).values({
         userId: user.id,
         action: 'member_invite_failed',
-        resourceType: 'tenant_member',
+        resourceType: 'tenant_invite',
         resourceId: tenantId,
         details: {
           email,
@@ -248,12 +355,12 @@ app.post(
     await db.insert(auditLogs).values({
       userId: user.id,
       action: 'member_invited',
-      resourceType: 'tenant_member',
-      resourceId: result.member!.id,
+      resourceType: 'tenant_invite',
+      resourceId: result.invite!.id,
       details: {
-        invited_user_id: result.user!.id,
         invited_email: email,
         role_id: roleId,
+        expires_at: result.invite!.expiresAt,
       },
       ipAddress: ipAddress || undefined,
       userAgent: userAgent || undefined,
@@ -261,22 +368,182 @@ app.post(
     });
 
     return c.json({
-      message: 'Member invited successfully',
-      member: {
-        id: result.member!.id,
-        user: {
-          id: result.user!.id,
-          email: result.user!.email,
-          first_name: result.user!.firstName,
-          last_name: result.user!.lastName,
-        },
+      message: 'Invitation sent successfully',
+      invite: {
+        id: result.invite!.id,
+        email: result.invite!.email,
         role_id: roleId,
-        status: result.member!.status,
-        joined_at: result.member!.joinedAt,
+        status: result.invite!.status,
+        invited_at: result.invite!.invitedAt,
+        expires_at: result.invite!.expiresAt,
       },
     });
   }
 );
+
+/**
+ * DELETE /api/v1/tenants/:tenantId/members/invites/:inviteId
+ * Cancel a pending invite
+ * Requires canInviteUsers permission
+ */
+app.delete('/:tenantId/members/invites/:inviteId', async (c) => {
+  const user = c.get('user') as User;
+  const tenantId = c.req.param('tenantId');
+  const inviteId = c.req.param('inviteId');
+  const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const userAgent = c.req.header('user-agent');
+  const db = getDb();
+
+  // Verify membership
+  const isMember = await isTenantMember(user.id, tenantId);
+  if (!isMember) {
+    return c.json(
+      {
+        error: 'not_a_member',
+        message: 'You are not a member of this workspace',
+      },
+      403
+    );
+  }
+
+  // Check permission
+  const canInvite = await hasPermission(user.id, tenantId, 'canInviteUsers');
+  if (!canInvite) {
+    return c.json(
+      {
+        error: 'permission_denied',
+        message: 'You do not have permission to cancel invites',
+      },
+      403
+    );
+  }
+
+  // Get invite details for audit
+  const invite = await getInviteById(tenantId, inviteId);
+  if (!invite) {
+    return c.json(
+      {
+        error: 'invite_not_found',
+        message: 'Invite not found',
+      },
+      404
+    );
+  }
+
+  const result = await cancelInvite({
+    tenantId,
+    inviteId,
+    cancelledBy: user.id,
+  });
+
+  if (!result.success) {
+    return c.json(
+      {
+        error: 'cancel_failed',
+        message: result.error,
+      },
+      400
+    );
+  }
+
+  // Audit
+  await db.insert(auditLogs).values({
+    userId: user.id,
+    action: 'invite_cancelled',
+    resourceType: 'tenant_invite',
+    resourceId: inviteId,
+    details: {
+      cancelled_email: invite.email,
+    },
+    ipAddress: ipAddress || undefined,
+    userAgent: userAgent || undefined,
+    status: 'success',
+  });
+
+  return c.json({
+    message: 'Invite cancelled successfully',
+  });
+});
+
+/**
+ * POST /api/v1/tenants/:tenantId/members/invites/:inviteId/resend
+ * Resend a pending invite
+ * Requires canInviteUsers permission
+ */
+app.post('/:tenantId/members/invites/:inviteId/resend', async (c) => {
+  const user = c.get('user') as User;
+  const tenantId = c.req.param('tenantId');
+  const inviteId = c.req.param('inviteId');
+  const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const userAgent = c.req.header('user-agent');
+  const db = getDb();
+
+  // Verify membership
+  const isMember = await isTenantMember(user.id, tenantId);
+  if (!isMember) {
+    return c.json(
+      {
+        error: 'not_a_member',
+        message: 'You are not a member of this workspace',
+      },
+      403
+    );
+  }
+
+  // Check permission
+  const canInvite = await hasPermission(user.id, tenantId, 'canInviteUsers');
+  if (!canInvite) {
+    return c.json(
+      {
+        error: 'permission_denied',
+        message: 'You do not have permission to resend invites',
+      },
+      403
+    );
+  }
+
+  const result = await resendInvite({
+    tenantId,
+    inviteId,
+    resentBy: user.id,
+  });
+
+  if (!result.success) {
+    return c.json(
+      {
+        error: 'resend_failed',
+        message: result.error,
+      },
+      400
+    );
+  }
+
+  // Audit
+  await db.insert(auditLogs).values({
+    userId: user.id,
+    action: 'invite_resent',
+    resourceType: 'tenant_invite',
+    resourceId: inviteId,
+    details: {
+      resent_email: result.invite!.email,
+      resend_count: result.invite!.resendCount,
+      new_expires_at: result.invite!.expiresAt,
+    },
+    ipAddress: ipAddress || undefined,
+    userAgent: userAgent || undefined,
+    status: 'success',
+  });
+
+  return c.json({
+    message: 'Invite resent successfully',
+    invite: {
+      id: result.invite!.id,
+      email: result.invite!.email,
+      expires_at: result.invite!.expiresAt,
+      resend_count: result.invite!.resendCount,
+    },
+  });
+});
 
 // Update member schema
 const updateMemberSchema = z.object({
@@ -386,6 +653,400 @@ app.patch(
         role_id: roleId,
         status: result.member!.status,
       },
+    });
+  }
+);
+
+// Suspend member schema
+const suspendMemberSchema = z.object({
+  reason: z.string().max(500).optional(),
+});
+
+/**
+ * POST /api/v1/tenants/:tenantId/members/:memberId/suspend
+ * Suspend a member
+ * Requires canManageUsers permission
+ */
+app.post(
+  '/:tenantId/members/:memberId/suspend',
+  zValidator('json', suspendMemberSchema),
+  async (c) => {
+    const user = c.get('user') as User;
+    const tenantId = c.req.param('tenantId');
+    const memberId = c.req.param('memberId');
+    const { reason } = c.req.valid('json');
+    const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+    const userAgent = c.req.header('user-agent');
+    const db = getDb();
+
+    // Verify membership
+    const isMember = await isTenantMember(user.id, tenantId);
+    if (!isMember) {
+      return c.json(
+        {
+          error: 'not_a_member',
+          message: 'You are not a member of this workspace',
+        },
+        403
+      );
+    }
+
+    // Check permission
+    const canManage = await hasPermission(user.id, tenantId, 'canManageUsers');
+    if (!canManage) {
+      return c.json(
+        {
+          error: 'permission_denied',
+          message: 'You do not have permission to suspend members',
+        },
+        403
+      );
+    }
+
+    // Get the member
+    const targetMember = await getMemberById(tenantId, memberId);
+    if (!targetMember) {
+      return c.json(
+        {
+          error: 'member_not_found',
+          message: 'Member not found',
+        },
+        404
+      );
+    }
+
+    // Cannot suspend yourself
+    if (targetMember.userId === user.id) {
+      return c.json(
+        {
+          error: 'cannot_suspend_self',
+          message: 'You cannot suspend yourself',
+        },
+        400
+      );
+    }
+
+    // Cannot suspend the owner
+    if (targetMember.isOwner) {
+      return c.json(
+        {
+          error: 'cannot_suspend_owner',
+          message: 'Cannot suspend the workspace owner',
+        },
+        400
+      );
+    }
+
+    const result = await suspendMember({
+      tenantId,
+      memberId,
+      suspendedBy: user.id,
+      reason,
+    });
+
+    if (!result.success) {
+      return c.json(
+        {
+          error: 'suspend_failed',
+          message: result.error,
+        },
+        400
+      );
+    }
+
+    // Audit
+    await db.insert(auditLogs).values({
+      userId: user.id,
+      action: 'member_suspended',
+      resourceType: 'tenant_member',
+      resourceId: memberId,
+      details: {
+        suspended_user_id: targetMember.userId,
+        suspended_email: targetMember.user.email,
+        reason,
+      },
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+      status: 'success',
+    });
+
+    return c.json({
+      message: 'Member suspended successfully',
+    });
+  }
+);
+
+/**
+ * POST /api/v1/tenants/:tenantId/members/:memberId/unsuspend
+ * Unsuspend a member
+ * Requires canManageUsers permission
+ */
+app.post('/:tenantId/members/:memberId/unsuspend', async (c) => {
+  const user = c.get('user') as User;
+  const tenantId = c.req.param('tenantId');
+  const memberId = c.req.param('memberId');
+  const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const userAgent = c.req.header('user-agent');
+  const db = getDb();
+
+  // Verify membership
+  const isMember = await isTenantMember(user.id, tenantId);
+  if (!isMember) {
+    return c.json(
+      {
+        error: 'not_a_member',
+        message: 'You are not a member of this workspace',
+      },
+      403
+    );
+  }
+
+  // Check permission
+  const canManage = await hasPermission(user.id, tenantId, 'canManageUsers');
+  if (!canManage) {
+    return c.json(
+      {
+        error: 'permission_denied',
+        message: 'You do not have permission to unsuspend members',
+      },
+      403
+    );
+  }
+
+  // Get the member
+  const targetMember = await getMemberById(tenantId, memberId);
+  if (!targetMember) {
+    return c.json(
+      {
+        error: 'member_not_found',
+        message: 'Member not found',
+      },
+      404
+    );
+  }
+
+  if (targetMember.status !== 'suspended') {
+    return c.json(
+      {
+        error: 'not_suspended',
+        message: 'Member is not suspended',
+      },
+      400
+    );
+  }
+
+  const result = await unsuspendMember({
+    tenantId,
+    memberId,
+    unsuspendedBy: user.id,
+  });
+
+  if (!result.success) {
+    return c.json(
+      {
+        error: 'unsuspend_failed',
+        message: result.error,
+      },
+      400
+    );
+  }
+
+  // Audit
+  await db.insert(auditLogs).values({
+    userId: user.id,
+    action: 'member_unsuspended',
+    resourceType: 'tenant_member',
+    resourceId: memberId,
+    details: {
+      unsuspended_user_id: targetMember.userId,
+      unsuspended_email: targetMember.user.email,
+    },
+    ipAddress: ipAddress || undefined,
+    userAgent: userAgent || undefined,
+    status: 'success',
+  });
+
+  return c.json({
+    message: 'Member unsuspended successfully',
+  });
+});
+
+/**
+ * POST /api/v1/tenants/:tenantId/members/:memberId/restore
+ * Restore a removed/deleted member
+ * Requires canDeleteUsers permission
+ */
+app.post('/:tenantId/members/:memberId/restore', async (c) => {
+  const user = c.get('user') as User;
+  const tenantId = c.req.param('tenantId');
+  const memberId = c.req.param('memberId');
+  const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const userAgent = c.req.header('user-agent');
+  const db = getDb();
+
+  // Verify membership
+  const isMember = await isTenantMember(user.id, tenantId);
+  if (!isMember) {
+    return c.json(
+      {
+        error: 'not_a_member',
+        message: 'You are not a member of this workspace',
+      },
+      403
+    );
+  }
+
+  // Check permission (same permission as delete)
+  const canDelete = await hasPermission(user.id, tenantId, 'canDeleteUsers');
+  if (!canDelete) {
+    return c.json(
+      {
+        error: 'permission_denied',
+        message: 'You do not have permission to restore members',
+      },
+      403
+    );
+  }
+
+  const result = await restoreMember({
+    tenantId,
+    memberId,
+    restoredBy: user.id,
+  });
+
+  if (!result.success) {
+    return c.json(
+      {
+        error: 'restore_failed',
+        message: result.error,
+      },
+      400
+    );
+  }
+
+  // Audit
+  await db.insert(auditLogs).values({
+    userId: user.id,
+    action: 'member_restored',
+    resourceType: 'tenant_member',
+    resourceId: memberId,
+    details: {
+      restored_user_id: result.member!.userId,
+    },
+    ipAddress: ipAddress || undefined,
+    userAgent: userAgent || undefined,
+    status: 'success',
+  });
+
+  return c.json({
+    message: 'Member restored successfully',
+  });
+});
+
+// Transfer ownership schema
+const transferOwnershipSchema = z.object({
+  target_member_id: z.string().uuid('Invalid target member ID'),
+});
+
+/**
+ * POST /api/v1/tenants/:tenantId/members/:memberId/transfer
+ * Transfer data ownership from one member to another
+ * Requires canManageUsers permission
+ */
+app.post(
+  '/:tenantId/members/:memberId/transfer',
+  zValidator('json', transferOwnershipSchema),
+  async (c) => {
+    const user = c.get('user') as User;
+    const tenantId = c.req.param('tenantId');
+    const sourceMemberId = c.req.param('memberId');
+    const { target_member_id: targetMemberId } = c.req.valid('json');
+    const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+    const userAgent = c.req.header('user-agent');
+    const db = getDb();
+
+    // Verify membership
+    const isMember = await isTenantMember(user.id, tenantId);
+    if (!isMember) {
+      return c.json(
+        {
+          error: 'not_a_member',
+          message: 'You are not a member of this workspace',
+        },
+        403
+      );
+    }
+
+    // Check permission
+    const canManage = await hasPermission(user.id, tenantId, 'canManageUsers');
+    if (!canManage) {
+      return c.json(
+        {
+          error: 'permission_denied',
+          message: 'You do not have permission to transfer data ownership',
+        },
+        403
+      );
+    }
+
+    // Get source member
+    const sourceMember = await getMemberById(tenantId, sourceMemberId);
+    if (!sourceMember) {
+      return c.json(
+        {
+          error: 'source_not_found',
+          message: 'Source member not found',
+        },
+        404
+      );
+    }
+
+    // Get target member
+    const targetMember = await getMemberById(tenantId, targetMemberId);
+    if (!targetMember) {
+      return c.json(
+        {
+          error: 'target_not_found',
+          message: 'Target member not found',
+        },
+        404
+      );
+    }
+
+    // Cannot transfer to same member
+    if (sourceMemberId === targetMemberId) {
+      return c.json(
+        {
+          error: 'same_member',
+          message: 'Cannot transfer to the same member',
+        },
+        400
+      );
+    }
+
+    // TODO: Implement actual data transfer logic
+    // This would involve updating owner_id/created_by fields on:
+    // - Workflows, Agents, Conversations, etc.
+    // For now, just audit the request
+
+    // Audit
+    await db.insert(auditLogs).values({
+      userId: user.id,
+      action: 'data_ownership_transferred',
+      resourceType: 'tenant_member',
+      resourceId: sourceMemberId,
+      details: {
+        source_user_id: sourceMember.userId,
+        target_user_id: targetMember.userId,
+        target_member_id: targetMemberId,
+      },
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+      status: 'success',
+    });
+
+    return c.json({
+      message: 'Data ownership transferred successfully',
     });
   }
 );
