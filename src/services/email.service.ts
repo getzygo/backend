@@ -32,6 +32,7 @@ import { TenantDeletionCancelled } from '../emails/templates/tenant-deletion-can
 import { MagicLink } from '../emails/templates/magic-link';
 import { TenantEmailVerification } from '../emails/templates/tenant-email-verification';
 import { CriticalActionVerification } from '../emails/templates/critical-action-verification';
+import { TeamInvite } from '../emails/templates/team-invite';
 
 // Types
 interface SendEmailOptions {
@@ -834,6 +835,48 @@ export async function sendCriticalActionVerificationEmail(
   });
 }
 
+/**
+ * Send team invite email
+ * Used when inviting a user to join a tenant/workspace
+ */
+export async function sendTeamInviteEmail(
+  email: string,
+  options: {
+    inviteeName?: string;
+    inviterName?: string;
+    tenantName?: string;
+    roleName?: string;
+    message?: string;
+    inviteToken: string;
+    tenantSlug: string;
+    expiresInDays?: number;
+  }
+): Promise<SendEmailResult> {
+  const acceptUrl = `https://${options.tenantSlug}.zygo.tech/invite/${options.inviteToken}`;
+
+  if (!isSmtpConfigured()) {
+    logger.dev(` Team invite email would be sent to ${email}:`, {
+      ...options,
+      acceptUrl,
+    });
+    return { sent: true };
+  }
+
+  return sendEmail({
+    to: email,
+    subject: `${options.inviterName || 'Someone'} invited you to join ${options.tenantName || 'a workspace'} on Zygo`,
+    template: TeamInvite({
+      inviteeName: options.inviteeName,
+      inviterName: options.inviterName,
+      tenantName: options.tenantName,
+      roleName: options.roleName,
+      message: options.message,
+      acceptUrl,
+      expiresInDays: options.expiresInDays || 7,
+    }),
+  });
+}
+
 // Export the service object for backwards compatibility
 export const emailService = {
   sendVerificationEmail,
@@ -858,4 +901,5 @@ export const emailService = {
   sendMagicLinkEmail,
   sendTenantVerificationEmail,
   sendCriticalActionVerificationEmail,
+  sendTeamInviteEmail,
 };

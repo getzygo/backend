@@ -442,12 +442,19 @@ export async function removeMember(params: {
     };
   }
 
-  // Soft-delete: set status to 'removed'
-  // Note: deletedBy, deletionReason, and retentionExpiresAt would require schema additions
+  // Soft-delete: set status to 'removed' with retention period (30 days)
+  const retentionDays = 30;
+  const retentionExpiresAt = new Date();
+  retentionExpiresAt.setDate(retentionExpiresAt.getDate() + retentionDays);
+
   await db
     .update(tenantMembers)
     .set({
       status: 'removed',
+      deletedAt: new Date(),
+      deletedBy: removedBy,
+      deletionReason: reason,
+      retentionExpiresAt,
       updatedAt: new Date(),
     })
     .where(eq(tenantMembers.id, memberId));
@@ -525,11 +532,14 @@ export async function suspendMember(params: {
     };
   }
 
-  // Set status to suspended
+  // Set status to suspended with tracking info
   const [updated] = await db
     .update(tenantMembers)
     .set({
       status: 'suspended',
+      suspendedAt: new Date(),
+      suspendedBy,
+      suspensionReason: reason,
       updatedAt: new Date(),
     })
     .where(eq(tenantMembers.id, memberId))
@@ -573,11 +583,14 @@ export async function unsuspendMember(params: {
     };
   }
 
-  // Set status back to active
+  // Set status back to active and clear suspension fields
   const [updated] = await db
     .update(tenantMembers)
     .set({
       status: 'active',
+      suspendedAt: null,
+      suspendedBy: null,
+      suspensionReason: null,
       updatedAt: new Date(),
     })
     .where(eq(tenantMembers.id, memberId))
@@ -631,6 +644,14 @@ export async function restoreMember(params: {
     };
   }
 
+  // Check if retention period has expired
+  if (member.retentionExpiresAt && new Date() > new Date(member.retentionExpiresAt)) {
+    return {
+      success: false,
+      error: 'Retention period has expired. This member cannot be restored.',
+    };
+  }
+
   // Check plan limits before restoring
   const canAdd = await canAddMember(tenantId);
   if (!canAdd.allowed) {
@@ -640,11 +661,15 @@ export async function restoreMember(params: {
     };
   }
 
-  // Restore: set status back to active
+  // Restore: set status back to active and clear deletion fields
   const [updated] = await db
     .update(tenantMembers)
     .set({
       status: 'active',
+      deletedAt: null,
+      deletedBy: null,
+      deletionReason: null,
+      retentionExpiresAt: null,
       updatedAt: new Date(),
     })
     .where(eq(tenantMembers.id, memberId))

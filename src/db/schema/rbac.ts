@@ -158,6 +158,17 @@ export const tenantMembers = pgTable(
     invitedAt: timestamp('invited_at', { withTimezone: true }),
     joinedAt: timestamp('joined_at', { withTimezone: true }),
 
+    // Suspension tracking
+    suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+    suspendedBy: uuid('suspended_by').references(() => users.id, { onDelete: 'set null' }),
+    suspensionReason: text('suspension_reason'),
+
+    // Deletion/removal tracking (soft delete with retention)
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    deletedBy: uuid('deleted_by').references(() => users.id, { onDelete: 'set null' }),
+    deletionReason: text('deletion_reason'),
+    retentionExpiresAt: timestamp('retention_expires_at', { withTimezone: true }),
+
     // Timestamps
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

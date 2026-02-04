@@ -143,11 +143,15 @@ app.get('/:tenantId/members', async (c) => {
       status: m.status,
       joined_at: m.joinedAt,
       invited_at: m.invitedAt,
-      // Extended fields for deleted members
-      deleted_at: (m as any).deletedAt,
-      deleted_by: (m as any).deletedBy,
-      deletion_reason: (m as any).deletionReason,
-      retention_expires_at: (m as any).retentionExpiresAt,
+      // Suspension tracking
+      suspended_at: m.suspendedAt,
+      suspended_by: m.suspendedBy,
+      suspension_reason: m.suspensionReason,
+      // Deletion tracking (for removed members)
+      deleted_at: m.deletedAt,
+      deleted_by: m.deletedBy,
+      deletion_reason: m.deletionReason,
+      retention_expires_at: m.retentionExpiresAt,
     })),
     count: members.length,
   });
@@ -1054,7 +1058,8 @@ app.post(
 /**
  * DELETE /api/v1/tenants/:tenantId/members/:memberId
  * Remove a member from the tenant
- * Requires canRemoveMembers permission
+ * Requires canDeleteUsers permission
+ * Body (optional): { reason?: string }
  */
 app.delete('/:tenantId/members/:memberId', async (c) => {
   const user = c.get('user') as User;
@@ -1063,6 +1068,17 @@ app.delete('/:tenantId/members/:memberId', async (c) => {
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
   const db = getDb();
+
+  // Parse optional body for deletion reason
+  let reason: string | undefined;
+  try {
+    const body = await c.req.json();
+    if (body && typeof body.reason === 'string') {
+      reason = body.reason.slice(0, 500); // Limit reason to 500 chars
+    }
+  } catch {
+    // Body is optional, ignore parse errors
+  }
 
   // Verify membership
   const isMember = await isTenantMember(user.id, tenantId);
@@ -1115,6 +1131,7 @@ app.delete('/:tenantId/members/:memberId', async (c) => {
     tenantId,
     memberId,
     removedBy: user.id,
+    reason,
   });
 
   if (!result.success) {
@@ -1136,6 +1153,8 @@ app.delete('/:tenantId/members/:memberId', async (c) => {
     details: {
       removed_user_id: targetMember.userId,
       removed_email: targetMember.user.email,
+      reason: reason || null,
+      retention_days: 30,
     },
     ipAddress: ipAddress || undefined,
     userAgent: userAgent || undefined,
@@ -1144,6 +1163,7 @@ app.delete('/:tenantId/members/:memberId', async (c) => {
 
   return c.json({
     message: 'Member removed successfully',
+    retention_days: 30,
   });
 });
 

@@ -24,6 +24,7 @@ import {
   type User,
 } from '../db/schema';
 import { canAddMember } from './member.service';
+import { sendTeamInviteEmail } from './email.service';
 
 // Invite expiration: 7 days
 const INVITE_EXPIRATION_DAYS = 7;
@@ -142,6 +143,18 @@ export async function createInvite(params: {
     };
   }
 
+  // Get tenant info for the email
+  const tenant = await db.query.tenants.findFirst({
+    where: eq(tenants.id, tenantId),
+    columns: { name: true, slug: true },
+  });
+
+  // Get inviter info for the email
+  const inviter = await db.query.users.findFirst({
+    where: eq(users.id, invitedBy),
+    columns: { firstName: true, lastName: true, email: true },
+  });
+
   // Create the invite
   const token = generateInviteToken();
   const [invite] = await db
@@ -159,8 +172,21 @@ export async function createInvite(params: {
     })
     .returning();
 
-  // TODO: Send invite email here
-  // await sendInviteEmail({ invite, tenant, role, inviter });
+  // Send invite email
+  const inviterName = inviter
+    ? `${inviter.firstName || ''} ${inviter.lastName || ''}`.trim() || inviter.email
+    : 'A team member';
+
+  await sendTeamInviteEmail(normalizedEmail, {
+    inviteeName: existingUser?.firstName || undefined,
+    inviterName,
+    tenantName: tenant?.name || 'a workspace',
+    roleName: role.name,
+    message,
+    inviteToken: token,
+    tenantSlug: tenant?.slug || 'app',
+    expiresInDays: INVITE_EXPIRATION_DAYS,
+  });
 
   return {
     success: true,
@@ -300,8 +326,45 @@ export async function resendInvite(params: {
     .where(eq(tenantInvites.id, inviteId))
     .returning();
 
-  // TODO: Send invite email here
-  // await sendInviteEmail({ invite: updated, tenant, role, inviter });
+  // Get tenant, role, and inviter info for the email
+  const tenant = await db.query.tenants.findFirst({
+    where: eq(tenants.id, tenantId),
+    columns: { name: true, slug: true },
+  });
+
+  const role = await db.query.roles.findFirst({
+    where: eq(roles.id, invite.roleId),
+    columns: { name: true },
+  });
+
+  const inviter = await db.query.users.findFirst({
+    where: eq(users.id, invite.invitedBy),
+    columns: { firstName: true, lastName: true, email: true },
+  });
+
+  // Get invitee user info if they exist
+  const inviteeUser = invite.userId
+    ? await db.query.users.findFirst({
+        where: eq(users.id, invite.userId),
+        columns: { firstName: true },
+      })
+    : null;
+
+  // Send invite email
+  const inviterName = inviter
+    ? `${inviter.firstName || ''} ${inviter.lastName || ''}`.trim() || inviter.email
+    : 'A team member';
+
+  await sendTeamInviteEmail(invite.email, {
+    inviteeName: inviteeUser?.firstName || undefined,
+    inviterName,
+    tenantName: tenant?.name || 'a workspace',
+    roleName: role?.name || 'Member',
+    message: invite.message || undefined,
+    inviteToken: newToken,
+    tenantSlug: tenant?.slug || 'app',
+    expiresInDays: INVITE_EXPIRATION_DAYS,
+  });
 
   return {
     success: true,
