@@ -176,7 +176,8 @@ app.post('/', rateLimit(RATE_LIMITS.AUTH), zValidator('json', signupSchema), asy
     });
 
     // Build redirect URL with auth token
-    const redirectUrl = `https://${result.tenant.slug}.zygo.tech?auth_token=${authToken}`;
+    // Use fragment (#) instead of query param (?) - fragments are NOT sent to server/logged
+    const redirectUrl = `https://${result.tenant.slug}.zygo.tech/#auth_token=${authToken}`;
 
     // Set HTTPOnly cookies for secure token storage (if we have session)
     if (authResult.session) {
@@ -437,7 +438,8 @@ app.post('/create-workspace', zValidator('json', createWorkspaceSchema), async (
     });
 
     // 8. Build redirect URL
-    const redirectUrl = `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`;
+    // Use fragment (#) instead of query param (?) - fragments are NOT sent to server/logged
+    const redirectUrl = `https://${tenantResult.tenant.slug}.zygo.tech/#auth_token=${authToken}`;
 
     // Set HTTPOnly cookies for secure token storage (if we have session)
     if (authResult.session) {

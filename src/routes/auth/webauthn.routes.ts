@@ -261,7 +261,8 @@ app.post('/authenticate/verify', zValidator('json', authVerifySchema), async (c)
       tenantMemberships,
     });
     responseData.auth_token = authToken;
-    responseData.redirect_url = `https://${membership.tenant.slug}.zygo.tech?auth_token=${authToken}`;
+    // Use fragment (#) instead of query param (?) - fragments are NOT sent to server/logged
+    responseData.redirect_url = `https://${membership.tenant.slug}.zygo.tech/#auth_token=${authToken}`;
   } else if (userTenants.length === 0) {
     responseData.redirect_url = '/create-workspace';
   } else {

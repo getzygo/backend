@@ -394,7 +394,8 @@ app.post('/', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json', signinSchema)
         supabaseRefreshToken: authResult.session.refresh_token,
         tenantMemberships, // Cached tenant list for switcher UI
       });
-      redirectUrl = `https://${targetTenant.slug}.zygo.tech?auth_token=${authToken}`;
+      // Use fragment (#) instead of query param (?) - fragments are NOT sent to server/logged
+      redirectUrl = `https://${targetTenant.slug}.zygo.tech/#auth_token=${authToken}`;
     }
   }
 

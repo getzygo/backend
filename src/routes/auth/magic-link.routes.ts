@@ -313,7 +313,8 @@ app.post('/verify', zValidator('json', verifySchema), async (c) => {
   }
 
   // Build redirect URL (no MFA required)
-  const redirectUrl = result.redirectUrl || `https://${targetMembership.tenantSlug}.zygo.tech?auth_token=${authToken}`;
+  // Use fragment (#) instead of query param (?) - fragments are NOT sent to server/logged
+  const redirectUrl = result.redirectUrl || `https://${targetMembership.tenantSlug}.zygo.tech/#auth_token=${authToken}`;
 
   return c.json({
     success: true,
@@ -515,7 +516,8 @@ app.post('/verify-mfa', zValidator('json', verifyMfaSchema), async (c) => {
   });
 
   // Build redirect URL
-  const redirectUrl = session.redirectUrl || `https://${targetMembership.tenantSlug}.zygo.tech?auth_token=${authToken}`;
+  // Use fragment (#) instead of query param (?) - fragments are NOT sent to server/logged
+  const redirectUrl = session.redirectUrl || `https://${targetMembership.tenantSlug}.zygo.tech/#auth_token=${authToken}`;
 
   return c.json({
     success: true,

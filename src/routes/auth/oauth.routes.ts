@@ -982,7 +982,8 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
 
       // Check verification status - users can access dashboard during grace period
       const verificationStatus = await checkVerificationStatus(existingUser, tenantResult.tenant.id);
-      const dashboardUrl = `https://${tenantResult.tenant.slug}.zygo.tech?auth_token=${authToken}`;
+      // Use fragment (#) instead of query param (?) - fragments are NOT sent to server/logged
+      const dashboardUrl = `https://${tenantResult.tenant.slug}.zygo.tech/#auth_token=${authToken}`;
 
       return c.json(
         {
@@ -1094,7 +1095,8 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
     // Check if user needs to complete profile verification
     // Users can access dashboard during grace period for phone (3 days) and MFA (7 days)
     const verificationStatus = await checkVerificationStatus(result.user, result.tenant.id);
-    const dashboardUrl = `https://${result.tenant.slug}.zygo.tech?auth_token=${authToken}`;
+    // Use fragment (#) instead of query param (?) - fragments are NOT sent to server/logged
+    const dashboardUrl = `https://${result.tenant.slug}.zygo.tech/#auth_token=${authToken}`;
 
     // Only redirect to complete-profile if verification is actually required now
     // (profile incomplete, email unverified, or deadline passed)
