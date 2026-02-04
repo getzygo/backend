@@ -48,6 +48,7 @@ import domainsRoutes from './domains.routes';
 import membersRoutes from './members.routes';
 import settingsRoutes from './settings.routes';
 import contactsRoutes from './contacts.routes';
+import verificationRoutes from './verification.routes';
 import {
   getUserTenants,
   getTenantById,
@@ -779,5 +780,8 @@ app.route('/', settingsRoutes);
 
 // Mount Contacts routes (Company Contacts)
 app.route('/', contactsRoutes);
+
+// Mount Verification routes (Email/Phone verification for tenant settings)
+app.route('/', verificationRoutes);
 
 export default app;

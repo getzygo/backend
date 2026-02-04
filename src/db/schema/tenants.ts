@@ -94,6 +94,14 @@ export const tenants = pgTable(
     billingPhone: varchar('billing_phone', { length: 30 }),
     billingPhoneCountryCode: varchar('billing_phone_country_code', { length: 5 }),
 
+    // Verification status for contact fields
+    billingEmailVerified: boolean('billing_email_verified').default(false),
+    billingEmailVerifiedAt: timestamp('billing_email_verified_at', { withTimezone: true }),
+    billingPhoneVerified: boolean('billing_phone_verified').default(false),
+    billingPhoneVerifiedAt: timestamp('billing_phone_verified_at', { withTimezone: true }),
+    phoneVerified: boolean('phone_verified').default(false),
+    phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
+
     // Branding
     logoUrl: text('logo_url'),
     primaryColor: varchar('primary_color', { length: 7 }).default('#6366f1'),
@@ -198,6 +206,11 @@ export const tenantContacts = pgTable(
     email: varchar('email', { length: 255 }).notNull(),
     phone: varchar('phone', { length: 30 }),
     phoneCountryCode: varchar('phone_country_code', { length: 5 }),
+    // Verification status for contact fields
+    emailVerified: boolean('email_verified').default(false),
+    emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+    phoneVerified: boolean('phone_verified').default(false),
+    phoneVerifiedAt: timestamp('phone_verified_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

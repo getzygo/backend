@@ -124,6 +124,7 @@ app.get('/:tenantId/settings', async (c) => {
         website: settings.general.website,
         phone: settings.general.phone,
         phone_country_code: settings.general.phoneCountryCode,
+        phone_verified: settings.general.phoneVerified,
         has_logo: !!settings.general.logoUrl,
         primary_color: settings.general.primaryColor,
         address: {
@@ -149,6 +150,7 @@ app.get('/:tenantId/settings', async (c) => {
       },
       billing: {
         email: settings.billing.email,
+        email_verified: settings.billing.emailVerified,
         use_different_address: settings.billing.useDifferentAddress,
         address: settings.billing.address,
         address_line2: settings.billing.addressLine2,
@@ -158,6 +160,7 @@ app.get('/:tenantId/settings', async (c) => {
         country: settings.billing.country,
         phone: settings.billing.phone,
         phone_country_code: settings.billing.phoneCountryCode,
+        phone_verified: settings.billing.phoneVerified,
       },
       subscription: {
         plan: settings.subscription.plan,
@@ -171,9 +174,20 @@ app.get('/:tenantId/settings', async (c) => {
         type: c.type,
         name: c.name,
         email: c.email,
+        email_verified: c.emailVerified,
         phone: c.phone,
         phone_country_code: c.phoneCountryCode,
+        phone_verified: c.phoneVerified,
       })),
+      deletion: {
+        status: settings.deletion.status,
+        deletion_requested_at: settings.deletion.deletionRequestedAt?.toISOString() || null,
+        deletion_scheduled_at: settings.deletion.deletionScheduledAt?.toISOString() || null,
+        deletion_cancelable_until: settings.deletion.deletionCancelableUntil?.toISOString() || null,
+        can_cancel: settings.deletion.canCancel,
+        days_until_deletion: settings.deletion.daysUntilDeletion,
+        days_until_cancel_expires: settings.deletion.daysUntilCancelExpires,
+      },
     },
   });
 });

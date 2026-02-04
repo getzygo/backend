@@ -30,6 +30,7 @@ import { PrimaryContactChanged } from '../emails/templates/primary-contact-chang
 import { TenantDeletionRequested } from '../emails/templates/tenant-deletion-requested';
 import { TenantDeletionCancelled } from '../emails/templates/tenant-deletion-cancelled';
 import { MagicLink } from '../emails/templates/magic-link';
+import { TenantEmailVerification } from '../emails/templates/tenant-email-verification';
 
 // Types
 interface SendEmailOptions {
@@ -769,6 +770,36 @@ export async function sendMagicLinkEmail(
   });
 }
 
+/**
+ * Send tenant email verification code
+ * Used for verifying billing email and contact emails in tenant settings
+ */
+export async function sendTenantVerificationEmail(
+  email: string,
+  options: {
+    code: string;
+    tenantName?: string;
+    fieldName: string;
+    expiresInMinutes?: number;
+  }
+): Promise<{ sent: boolean; error?: string }> {
+  if (!isSmtpConfigured()) {
+    logger.dev(`Tenant verification code for ${email} (${options.fieldName}): ${options.code}`);
+    return { sent: true };
+  }
+
+  return sendEmail({
+    to: email,
+    subject: `Verify your ${options.fieldName} - Zygo`,
+    template: TenantEmailVerification({
+      code: options.code,
+      tenantName: options.tenantName,
+      fieldName: options.fieldName,
+      expiresInMinutes: options.expiresInMinutes || 15,
+    }),
+  });
+}
+
 // Export the service object for backwards compatibility
 export const emailService = {
   sendVerificationEmail,
@@ -791,4 +822,5 @@ export const emailService = {
   sendTenantDeletionRequestedEmail,
   sendTenantDeletionCancelledEmail,
   sendMagicLinkEmail,
+  sendTenantVerificationEmail,
 };

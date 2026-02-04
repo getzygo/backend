@@ -587,6 +587,7 @@ export interface TenantSettings {
     website: string | null;
     phone: string | null;
     phoneCountryCode: string | null;
+    phoneVerified: boolean;
     logoUrl: string | null;
     primaryColor: string | null;
     address: {
@@ -612,6 +613,7 @@ export interface TenantSettings {
   };
   billing: {
     email: string | null;
+    emailVerified: boolean;
     useDifferentAddress: boolean;
     address: string | null;
     addressLine2: string | null;
@@ -621,6 +623,7 @@ export interface TenantSettings {
     country: string | null;
     phone: string | null;
     phoneCountryCode: string | null;
+    phoneVerified: boolean;
   };
   subscription: {
     plan: string;
@@ -628,6 +631,15 @@ export interface TenantSettings {
     licenseCount: number | null;
     subscriptionStatus: string | null;
     trialExpiresAt: Date | null;
+  };
+  deletion: {
+    status: 'none' | 'pending' | 'deleted';
+    deletionRequestedAt: Date | null;
+    deletionScheduledAt: Date | null;
+    deletionCancelableUntil: Date | null;
+    canCancel: boolean;
+    daysUntilDeletion: number | null;
+    daysUntilCancelExpires: number | null;
   };
 }
 
@@ -651,6 +663,7 @@ export async function getTenantSettings(tenantId: string): Promise<TenantSetting
       website: tenant.website,
       phone: tenant.phone,
       phoneCountryCode: tenant.phoneCountryCode,
+      phoneVerified: tenant.phoneVerified ?? false,
       logoUrl: tenant.logoUrl,
       primaryColor: tenant.primaryColor,
       address: {
@@ -676,6 +689,7 @@ export async function getTenantSettings(tenantId: string): Promise<TenantSetting
     },
     billing: {
       email: tenant.billingEmail,
+      emailVerified: tenant.billingEmailVerified ?? false,
       useDifferentAddress: tenant.useDifferentBillingAddress ?? false,
       address: tenant.billingAddress,
       addressLine2: tenant.billingAddressLine2,
@@ -685,6 +699,7 @@ export async function getTenantSettings(tenantId: string): Promise<TenantSetting
       country: tenant.billingCountry,
       phone: tenant.billingPhone,
       phoneCountryCode: tenant.billingPhoneCountryCode,
+      phoneVerified: tenant.billingPhoneVerified ?? false,
     },
     subscription: {
       plan: tenant.plan,
@@ -693,6 +708,31 @@ export async function getTenantSettings(tenantId: string): Promise<TenantSetting
       subscriptionStatus: tenant.subscriptionStatus,
       trialExpiresAt: tenant.trialExpiresAt,
     },
+    deletion: (() => {
+      const now = new Date();
+      const isPendingDeletion = tenant.status === 'pending_deletion' && tenant.deletionScheduledAt;
+      const canCancel = isPendingDeletion && tenant.deletionCancelableUntil
+        ? now < tenant.deletionCancelableUntil
+        : false;
+      const daysUntilDeletion = isPendingDeletion && tenant.deletionScheduledAt
+        ? Math.max(0, Math.ceil((tenant.deletionScheduledAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+        : null;
+      const daysUntilCancelExpires = isPendingDeletion && tenant.deletionCancelableUntil
+        ? Math.max(0, Math.ceil((tenant.deletionCancelableUntil.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)))
+        : null;
+
+      return {
+        status: tenant.status === 'pending_deletion' ? 'pending' as const
+          : tenant.status === 'deleted' ? 'deleted' as const
+          : 'none' as const,
+        deletionRequestedAt: tenant.deletionRequestedAt,
+        deletionScheduledAt: tenant.deletionScheduledAt,
+        deletionCancelableUntil: tenant.deletionCancelableUntil,
+        canCancel,
+        daysUntilDeletion,
+        daysUntilCancelExpires,
+      };
+    })(),
   };
 }
 
