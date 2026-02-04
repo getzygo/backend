@@ -413,7 +413,6 @@ app.post('/verify-mfa', zValidator('json', verifyMfaSchema), async (c) => {
       userId: user.id,
       userAgent: userAgent || undefined,
       ipAddress: ipAddress || undefined,
-      expiresInDays: 30,
     });
   }
 
