@@ -11,8 +11,9 @@ import { trustedDevices, auditLogs } from '../db/schema';
 import { createDeviceHash, parseUserAgent } from './device-fingerprint.service';
 import type { TrustedDevice, NewTrustedDevice } from '../db/schema/security';
 
-// Trust duration in days
-const TRUST_DURATION_DAYS = 30;
+// Trust duration in days (reduced from 30 to 7 for security)
+// Shorter window reduces risk if device is compromised
+const TRUST_DURATION_DAYS = 7;
 
 interface TrustDeviceOptions {
   userId: string;

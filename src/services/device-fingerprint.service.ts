@@ -102,21 +102,48 @@ export function parseUserAgent(userAgent?: string): ParsedDevice {
 }
 
 /**
+ * Extract IP network identifier for device fingerprinting.
+ * Uses /16 for IPv4 (first 2 octets) and /48 for IPv6.
+ * This provides location-aware security without being too strict.
+ */
+function extractIpNetwork(ipAddress?: string): string {
+  if (!ipAddress) return 'unknown';
+
+  // IPv4: use first 2 octets (e.g., "192.168" from "192.168.1.100")
+  const ipv4Parts = ipAddress.split('.');
+  if (ipv4Parts.length === 4) {
+    return ipv4Parts.slice(0, 2).join('.');
+  }
+
+  // IPv6: use first 3 groups (/48 prefix)
+  if (ipAddress.includes(':')) {
+    const ipv6Parts = ipAddress.split(':');
+    return ipv6Parts.slice(0, 3).join(':');
+  }
+
+  return 'unknown';
+}
+
+/**
  * Create a device hash for trusted device tracking.
- * Uses a combination of browser and OS info (not full fingerprint).
+ * SECURITY: Includes IP network to prevent MFA bypass from different locations.
+ * Uses a combination of browser, OS, and IP network info.
  * This is privacy-conscious - doesn't use canvas/WebGL/etc.
  */
 export function createDeviceHash(info: DeviceInfo): string {
   const parsed = parseUserAgent(info.userAgent);
 
-  // Create a stable fingerprint from browser family + OS family
-  // Not too specific (respects privacy) but stable enough for device recognition
+  // Create a stable fingerprint from browser family + OS family + IP network
+  // IP network (/16 for IPv4) provides location-aware security
+  // Prevents MFA bypass from different networks even with spoofed User-Agent
   const components = [
     parsed.browser,
     parsed.os,
     parsed.deviceType,
     // Include language for additional uniqueness
     info.acceptLanguage?.split(',')[0] || 'unknown',
+    // SECURITY: Include IP network to require re-MFA when location changes
+    extractIpNetwork(info.ipAddress),
   ];
 
   const data = components.join('|');
