@@ -386,6 +386,10 @@ app.post('/', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json', signinSchema)
         avatarSource: user.avatarSource || undefined,
         emailVerified: user.emailVerified,
         emailVerifiedVia: user.emailVerifiedVia,
+        // Auth method for lock screen re-auth
+        authMethod: 'password',
+        oauthProvider: null,
+        hasPassword: true,
         roleId: membership.role.id,
         roleName: membership.role.name,
         roleSlug: membership.role.slug,
@@ -608,6 +612,11 @@ app.post('/switch-tenant', zValidator('json', switchTenantSchema), async (c) => 
     avatarSource: user.avatarSource || undefined,
     emailVerified: user.emailVerified,
     emailVerifiedVia: user.emailVerifiedVia,
+    // Auth method - for tenant switch, we preserve what's already cached in frontend
+    // (or default to password if user has one)
+    authMethod: user.passwordHash ? 'password' : undefined,
+    oauthProvider: null, // Frontend keeps this from original login
+    hasPassword: user.passwordHash !== null,
     roleId: membership.role.id,
     roleName: membership.role.name,
     roleSlug: membership.role.slug,

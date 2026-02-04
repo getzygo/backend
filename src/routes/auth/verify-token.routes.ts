@@ -143,6 +143,10 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
       avatarSource: payload.avatarSource || null,
       emailVerified: payload.emailVerified,
       emailVerifiedVia: payload.emailVerifiedVia,
+      // Auth method for lock screen re-auth
+      authMethod: payload.authMethod || null,
+      oauthProvider: payload.oauthProvider || null,
+      hasPassword: payload.hasPassword ?? true, // Assume true for backward compatibility
     },
     tenant: {
       id: tenant.id,

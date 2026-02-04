@@ -378,6 +378,10 @@ app.post('/signin', async (c) => {
           avatarSource: user.avatarSource || undefined,
           emailVerified: user.emailVerified,
           emailVerifiedVia: user.emailVerifiedVia,
+          // Auth method for lock screen re-auth
+          authMethod: provider as 'google' | 'github' | 'microsoft' | 'apple',
+          oauthProvider: provider as 'google' | 'github' | 'microsoft' | 'apple',
+          hasPassword: user.passwordHash !== null,
           roleId: membership.role.id,
           roleName: membership.role.name,
           roleSlug: membership.role.slug,
@@ -1048,6 +1052,10 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         avatarSource: existingUser.avatarSource || undefined,
         emailVerified: existingUser.emailVerified,
         emailVerifiedVia: existingUser.emailVerifiedVia || provider,
+        // Auth method for lock screen re-auth
+        authMethod: provider as 'google' | 'github' | 'microsoft' | 'apple',
+        oauthProvider: provider as 'google' | 'github' | 'microsoft' | 'apple',
+        hasPassword: existingUser.passwordHash !== null,
         roleId: tenantResult.ownerRole.id,
         roleName: tenantResult.ownerRole.name,
         roleSlug: tenantResult.ownerRole.slug,
@@ -1160,6 +1168,10 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       avatarSource: avatarUrl ? 'oauth' : undefined, // New OAuth signup
       emailVerified: result.user.emailVerified, // OAuth users are email-verified
       emailVerifiedVia: provider,
+      // Auth method for lock screen re-auth
+      authMethod: provider as 'google' | 'github' | 'microsoft' | 'apple',
+      oauthProvider: provider as 'google' | 'github' | 'microsoft' | 'apple',
+      hasPassword: false, // New OAuth signup = no password
       roleId: result.role.id,
       roleName: result.role.name,
       roleSlug: result.role.slug,
@@ -1359,6 +1371,10 @@ app.post('/verify-mfa', zValidator('json', verifyOAuthMfaSchema), async (c) => {
     avatarSource: user.avatarSource || undefined,
     emailVerified: user.emailVerified,
     emailVerifiedVia: user.emailVerifiedVia,
+    // Auth method for lock screen re-auth
+    authMethod: session.provider as 'google' | 'github' | 'microsoft' | 'apple',
+    oauthProvider: session.provider as 'google' | 'github' | 'microsoft' | 'apple',
+    hasPassword: user.passwordHash !== null,
     roleId: targetMembership.role.id,
     roleName: targetMembership.role.name,
     roleSlug: targetMembership.role.slug,

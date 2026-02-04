@@ -42,6 +42,10 @@ export interface AuthTokenPayload {
   avatarSource?: string | null;
   emailVerified: boolean;
   emailVerifiedVia?: string | null;
+  // Auth method used to login (for lock screen re-auth)
+  authMethod?: 'password' | 'google' | 'github' | 'microsoft' | 'apple' | 'magic_link';
+  oauthProvider?: 'google' | 'github' | 'microsoft' | 'apple' | null;
+  hasPassword?: boolean;
   // RBAC data
   roleId: string;
   roleName: string;

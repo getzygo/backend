@@ -257,6 +257,10 @@ app.post('/verify', zValidator('json', verifySchema), async (c) => {
     avatarSource: user.avatarSource || undefined,
     emailVerified: user.emailVerified,
     emailVerifiedVia: user.emailVerifiedVia,
+    // Auth method for lock screen re-auth
+    authMethod: 'magic_link',
+    oauthProvider: null,
+    hasPassword: user.passwordHash !== null,
     roleId: targetMembership.roleId,
     roleName: targetMembership.roleName,
     roleSlug: targetMembership.roleSlug,
@@ -485,6 +489,10 @@ app.post('/verify-mfa', zValidator('json', verifyMfaSchema), async (c) => {
     avatarSource: user.avatarSource || undefined,
     emailVerified: user.emailVerified,
     emailVerifiedVia: user.emailVerifiedVia,
+    // Auth method for lock screen re-auth
+    authMethod: 'magic_link',
+    oauthProvider: null,
+    hasPassword: user.passwordHash !== null,
     roleId: targetMembership.roleId,
     roleName: targetMembership.roleName,
     roleSlug: targetMembership.roleSlug,
