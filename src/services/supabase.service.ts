@@ -183,9 +183,17 @@ export async function getSession(accessToken: string): Promise<{
     };
 
     return { user, session: null, error: null };
-  } catch (jwtError) {
-    // JWT verification failed - token is invalid or expired
+  } catch (jwtError: any) {
+    // JWT verification failed - check if it's an expiration error
+    const errorCode = jwtError?.code || '';
     const errorMessage = jwtError instanceof Error ? jwtError.message : 'Token verification failed';
+
+    // Jose library uses 'ERR_JWT_EXPIRED' code for expired tokens
+    if (errorCode === 'ERR_JWT_EXPIRED' || errorMessage.includes('exp')) {
+      console.log('[Supabase] JWT expired');
+      return { user: null, session: null, error: 'JWT expired' };
+    }
+
     console.error('[Supabase] JWT verification failed:', errorMessage);
     return { user: null, session: null, error: errorMessage };
   }

@@ -43,10 +43,27 @@ export async function authMiddleware(c: Context, next: Next) {
   const sessionResult = await getSession(token);
 
   if (sessionResult.error || !sessionResult.user) {
+    // Check if the error indicates an expired session
+    const errorMsg = sessionResult.error?.toLowerCase() || '';
+    const isExpired = errorMsg.includes('expired') ||
+                      errorMsg.includes('jwt expired') ||
+                      errorMsg.includes('"exp" claim');
+
+    if (isExpired) {
+      return c.json(
+        {
+          error: 'session_expired',
+          message: 'Your session has expired. Please sign in again.',
+          redirect_url: '/signin',
+        },
+        401
+      );
+    }
+
     return c.json(
       {
         error: 'unauthorized',
-        message: sessionResult.error || 'Invalid or expired token',
+        message: sessionResult.error || 'Invalid token',
       },
       401
     );
