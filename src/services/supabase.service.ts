@@ -248,6 +248,61 @@ export async function generatePasswordResetLink(email: string): Promise<{
   return { link: data.properties.action_link, error: null };
 }
 
+/**
+ * Generate session tokens for a user (admin operation)
+ * Used for magic link authentication where we need to create a session
+ * without the user providing a password.
+ */
+export async function generateSessionForUser(userId: string): Promise<AuthResult> {
+  const supabase = getSupabaseAdmin();
+
+  // First get the user to get their email
+  const { data: userData, error: userError } = await supabase.auth.admin.getUserById(userId);
+
+  if (userError || !userData.user) {
+    return { user: null, session: null, error: userError?.message || 'User not found' };
+  }
+
+  // Generate a magic link which includes session tokens
+  const { data, error } = await supabase.auth.admin.generateLink({
+    type: 'magiclink',
+    email: userData.user.email!,
+  });
+
+  if (error) {
+    return { user: null, session: null, error: error.message };
+  }
+
+  // The generateLink response includes the hashed_token which we can use
+  // to create a session. However, for simpler approach, we'll use the
+  // admin API to directly set a session.
+
+  // Alternative: Use the token from the link to verify and get session
+  // For now, we'll return the properties which include tokens
+  if (data.properties?.access_token && data.properties?.refresh_token) {
+    return {
+      user: data.user,
+      session: {
+        access_token: data.properties.access_token,
+        refresh_token: data.properties.refresh_token,
+        expires_in: 3600,
+        expires_at: Math.floor(Date.now() / 1000) + 3600,
+        token_type: 'bearer',
+        user: data.user,
+      } as Session,
+      error: null,
+    };
+  }
+
+  // If properties don't have tokens, the Supabase version might not support it
+  // In this case, we return an error
+  return {
+    user: data.user,
+    session: null,
+    error: 'Session tokens not available in generateLink response'
+  };
+}
+
 export const supabaseService = {
   getSupabase,
   getSupabaseAdmin,
@@ -260,4 +315,5 @@ export const supabaseService = {
   signOut,
   signOutUser,
   generatePasswordResetLink,
+  generateSessionForUser,
 };

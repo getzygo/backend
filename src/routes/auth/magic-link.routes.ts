@@ -13,6 +13,7 @@ import { getDb } from '../../db/client';
 import { users, auditLogs, tenantMembers, tenants, roles } from '../../db/schema';
 import { createMagicLink, verifyMagicLink } from '../../services/magic-link.service';
 import { createAuthToken, type TenantMembership } from '../../services/auth-token.service';
+import { generateSessionForUser } from '../../services/supabase.service';
 
 const app = new Hono();
 
@@ -162,6 +163,20 @@ app.post('/verify', zValidator('json', verifySchema), async (c) => {
     isOwner: m.isOwner,
   }));
 
+  // Generate Supabase session tokens for the user
+  // This allows the tenant app to make authenticated API calls
+  let supabaseAccessToken: string | undefined;
+  let supabaseRefreshToken: string | undefined;
+
+  const sessionResult = await generateSessionForUser(user.id);
+  if (sessionResult.session) {
+    supabaseAccessToken = sessionResult.session.access_token;
+    supabaseRefreshToken = sessionResult.session.refresh_token;
+    console.log('[MagicLink] Generated Supabase session for user:', user.id);
+  } else {
+    console.warn('[MagicLink] Could not generate Supabase session:', sessionResult.error);
+  }
+
   // Generate opaque auth token for cross-domain redirect
   const authToken = await createAuthToken({
     userId: user.id,
@@ -177,8 +192,9 @@ app.post('/verify', zValidator('json', verifySchema), async (c) => {
     roleName: targetMembership.roleName,
     roleSlug: targetMembership.roleSlug,
     isOwner: targetMembership.isOwner,
-    // Note: Magic link doesn't provide Supabase tokens directly
-    // The frontend will need to establish a session separately
+    // Include Supabase tokens for authenticated API calls
+    supabaseAccessToken,
+    supabaseRefreshToken,
     tenantMemberships,
   });
 

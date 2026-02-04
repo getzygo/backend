@@ -26,6 +26,7 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { authMiddleware } from '../../middleware/auth.middleware';
+import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 import {
   isTenantMember,
   getTenantSettings,
@@ -45,6 +46,7 @@ import {
   sendPrimaryContactChangedEmail,
   sendTenantDeletionRequestedEmail,
   sendTenantDeletionCancelledEmail,
+  sendCriticalActionVerificationEmail,
 } from '../../services/email.service';
 import {
   uploadCompanyLogo,
@@ -60,6 +62,13 @@ import {
   GRACE_PERIOD_DAYS,
   CANCELLATION_WINDOW_DAYS,
 } from '../../services/tenant-deletion.service';
+import {
+  createChallenge,
+  getChallengeEmailCode,
+  verifyEmailCode as verifyChallengeEmailCode,
+  verifyCriticalActionMfaCode,
+  consumeChallenge,
+} from '../../services/critical-action-challenge.service';
 
 const app = new Hono();
 
@@ -776,25 +785,25 @@ app.get('/:tenantId/settings/deletion', async (c) => {
   });
 });
 
-// Request deletion schema
-const requestDeletionSchema = z.object({
+// Challenge schema for deletion
+const deletionChallengeSchema = z.object({
   confirmation: z.string().min(1, 'Confirmation is required'),
-  reason: z.string().max(500).optional(),
 });
 
 /**
- * POST /api/v1/tenants/:tenantId/settings/deletion
- * Request tenant deletion
- * Requires canDeleteTenant permission (MFA required by permission definition)
- * User must type the workspace name to confirm
+ * POST /api/v1/tenants/:tenantId/settings/deletion/challenge
+ * Create a deletion challenge and send email verification code
+ * Requires canDeleteTenant permission
+ * Rate limited: 3 attempts per 15 min
  */
 app.post(
-  '/:tenantId/settings/deletion',
-  zValidator('json', requestDeletionSchema),
+  '/:tenantId/settings/deletion/challenge',
+  rateLimit({ max: 3, windowSeconds: 15 * 60, message: 'Too many deletion attempts. Please try again later.' }),
+  zValidator('json', deletionChallengeSchema),
   async (c) => {
     const user = c.get('user') as User;
     const tenantId = c.req.param('tenantId');
-    const { confirmation, reason } = c.req.valid('json');
+    const { confirmation } = c.req.valid('json');
     const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
     const userAgent = c.req.header('user-agent');
     const db = getDb();
@@ -811,7 +820,7 @@ app.post(
       );
     }
 
-    // Check permission (canDeleteTenant requires MFA per permission definition)
+    // Check permission
     const canDelete = await hasPermission(user.id, tenantId, 'canDeleteTenant');
     if (!canDelete) {
       return c.json(
@@ -846,19 +855,237 @@ app.post(
       );
     }
 
-    // Request deletion
+    // Create the challenge
+    const challengeResult = await createChallenge(
+      user.id,
+      'tenant_deletion',
+      tenantId,
+      user.email,
+      { tenantName: tenant.name }
+    );
+
+    if (challengeResult.error) {
+      return c.json(
+        {
+          error: 'challenge_creation_failed',
+          message: challengeResult.error,
+        },
+        500
+      );
+    }
+
+    // Get the email code to send
+    const emailCode = await getChallengeEmailCode(user.id, 'tenant_deletion', tenantId);
+    if (!emailCode) {
+      return c.json(
+        {
+          error: 'challenge_creation_failed',
+          message: 'Failed to create verification code',
+        },
+        500
+      );
+    }
+
+    // Send verification email
+    const emailResult = await sendCriticalActionVerificationEmail(user.email, {
+      firstName: user.firstName || undefined,
+      actionDescription: `delete the workspace '${tenant.name}'`,
+      code: emailCode,
+      expiresInMinutes: 10,
+    });
+
+    if (!emailResult.sent) {
+      return c.json(
+        {
+          error: 'email_send_failed',
+          message: 'Failed to send verification email',
+        },
+        500
+      );
+    }
+
+    // Audit log
+    await db.insert(auditLogs).values({
+      userId: user.id,
+      action: 'tenant_deletion_challenge_created',
+      resourceType: 'tenant',
+      resourceId: tenantId,
+      details: {
+        requires_mfa: challengeResult.requiresMfa,
+      },
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+      status: 'success',
+    });
+
+    return c.json({
+      challenge_id: challengeResult.challengeId,
+      requires_mfa: challengeResult.requiresMfa,
+      email_sent_to: challengeResult.emailSentTo,
+      expires_in: challengeResult.expiresIn,
+    });
+  }
+);
+
+// Request deletion schema (now requires verification codes)
+const requestDeletionSchema = z.object({
+  email_code: z.string().length(6, 'Email code must be 6 digits'),
+  mfa_code: z.string().length(6).optional(),
+  reason: z.string().max(500).optional(),
+});
+
+/**
+ * POST /api/v1/tenants/:tenantId/settings/deletion
+ * Complete tenant deletion with verification codes
+ * Requires valid challenge with email code (+ MFA if user has MFA enabled)
+ * Rate limited: 10 attempts per minute to prevent MFA brute-force
+ */
+app.post(
+  '/:tenantId/settings/deletion',
+  rateLimit({ max: 10, windowSeconds: 60, message: 'Too many verification attempts. Please wait before trying again.' }),
+  zValidator('json', requestDeletionSchema),
+  async (c) => {
+    const user = c.get('user') as User;
+    const tenantId = c.req.param('tenantId');
+    const { email_code, mfa_code, reason } = c.req.valid('json');
+    const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+    const userAgent = c.req.header('user-agent');
+    const db = getDb();
+
+    // Verify membership
+    const isMember = await isTenantMember(user.id, tenantId);
+    if (!isMember) {
+      return c.json(
+        {
+          error: 'not_a_member',
+          message: 'You are not a member of this workspace',
+        },
+        403
+      );
+    }
+
+    // Check permission
+    const canDelete = await hasPermission(user.id, tenantId, 'canDeleteTenant');
+    if (!canDelete) {
+      return c.json(
+        {
+          error: 'permission_denied',
+          message: 'You do not have permission to delete this workspace',
+        },
+        403
+      );
+    }
+
+    // Get tenant
+    const tenant = await getTenantById(tenantId);
+    if (!tenant) {
+      return c.json(
+        {
+          error: 'tenant_not_found',
+          message: 'Workspace not found',
+        },
+        404
+      );
+    }
+
+    // Verify email code
+    const emailVerification = await verifyChallengeEmailCode(
+      user.id,
+      'tenant_deletion',
+      tenantId,
+      email_code
+    );
+
+    if (!emailVerification.verified) {
+      await db.insert(auditLogs).values({
+        userId: user.id,
+        action: 'tenant_deletion_email_verification_failed',
+        resourceType: 'tenant',
+        resourceId: tenantId,
+        details: { error: emailVerification.error },
+        ipAddress: ipAddress || undefined,
+        userAgent: userAgent || undefined,
+        status: 'failed',
+      });
+
+      // Map error to specific error codes
+      const errorCode = emailVerification.error?.includes('expired')
+        ? 'challenge_expired'
+        : emailVerification.error?.includes('not found')
+          ? 'challenge_required'
+          : 'email_code_invalid';
+
+      return c.json(
+        {
+          error: errorCode,
+          message: emailVerification.error || 'Invalid email verification code',
+        },
+        400
+      );
+    }
+
+    // Verify MFA code if user has MFA enabled
+    if (mfa_code) {
+      const mfaVerification = await verifyCriticalActionMfaCode(
+        user.id,
+        'tenant_deletion',
+        tenantId,
+        mfa_code
+      );
+
+      if (!mfaVerification.verified) {
+        await db.insert(auditLogs).values({
+          userId: user.id,
+          action: 'tenant_deletion_mfa_verification_failed',
+          resourceType: 'tenant',
+          resourceId: tenantId,
+          details: { error: mfaVerification.error },
+          ipAddress: ipAddress || undefined,
+          userAgent: userAgent || undefined,
+          status: 'failed',
+        });
+
+        return c.json(
+          {
+            error: 'mfa_code_invalid',
+            message: mfaVerification.error || 'Invalid MFA code',
+          },
+          400
+        );
+      }
+    }
+
+    // Consume the challenge (verifies all requirements are met)
+    const consumeResult = await consumeChallenge(user.id, 'tenant_deletion', tenantId);
+
+    if (!consumeResult.data) {
+      const errorCode = consumeResult.error || 'challenge_invalid';
+      const errorMessages: Record<string, string> = {
+        challenge_expired: 'Verification session has expired. Please start again.',
+        email_code_required: 'Email verification required',
+        mfa_code_required: 'MFA verification required',
+        challenge_invalid: 'Invalid verification session',
+      };
+
+      return c.json(
+        {
+          error: errorCode,
+          message: errorMessages[errorCode] || 'Verification failed',
+        },
+        400
+      );
+    }
+
+    // All verifications passed - proceed with deletion
     const result = await requestTenantDeletion(tenantId, user.id, reason);
 
     if (!result.success) {
-      // Audit failed attempt
       await db.insert(auditLogs).values({
         userId: user.id,
         action: 'tenant_deletion_request_failed',
         resourceType: 'tenant',
         resourceId: tenantId,
-        details: {
-          error: result.error,
-        },
+        details: { error: result.error },
         ipAddress: ipAddress || undefined,
         userAgent: userAgent || undefined,
         status: 'failed',
@@ -883,6 +1110,7 @@ app.post(
         reason,
         scheduled_at: result.deletionScheduledAt?.toISOString(),
         cancelable_until: result.deletionCancelableUntil?.toISOString(),
+        verified_with_mfa: consumeResult.data.requiresMfa,
       },
       ipAddress: ipAddress || undefined,
       userAgent: userAgent || undefined,
@@ -907,6 +1135,7 @@ app.post(
     return c.json({
       message: 'Deletion requested successfully',
       data: {
+        success: true,
         deletion_scheduled_at: result.deletionScheduledAt,
         deletion_cancelable_until: result.deletionCancelableUntil,
         grace_period_days: GRACE_PERIOD_DAYS,

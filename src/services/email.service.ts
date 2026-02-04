@@ -31,6 +31,7 @@ import { TenantDeletionRequested } from '../emails/templates/tenant-deletion-req
 import { TenantDeletionCancelled } from '../emails/templates/tenant-deletion-cancelled';
 import { MagicLink } from '../emails/templates/magic-link';
 import { TenantEmailVerification } from '../emails/templates/tenant-email-verification';
+import { CriticalActionVerification } from '../emails/templates/critical-action-verification';
 
 // Types
 interface SendEmailOptions {
@@ -800,6 +801,36 @@ export async function sendTenantVerificationEmail(
   });
 }
 
+/**
+ * Send critical action verification email
+ * Used for high-security actions like tenant deletion, account deletion, etc.
+ */
+export async function sendCriticalActionVerificationEmail(
+  email: string,
+  options: {
+    firstName?: string;
+    actionDescription: string;
+    code: string;
+    expiresInMinutes?: number;
+  }
+): Promise<{ sent: boolean; error?: string }> {
+  if (!isSmtpConfigured()) {
+    logger.dev(`Critical action verification code for ${email}: ${options.code}`);
+    return { sent: true };
+  }
+
+  return sendEmail({
+    to: email,
+    subject: 'Security verification required - Zygo',
+    template: CriticalActionVerification({
+      firstName: options.firstName,
+      actionDescription: options.actionDescription,
+      code: options.code,
+      expiresInMinutes: options.expiresInMinutes || 10,
+    }),
+  });
+}
+
 // Export the service object for backwards compatibility
 export const emailService = {
   sendVerificationEmail,
@@ -823,4 +854,5 @@ export const emailService = {
   sendTenantDeletionCancelledEmail,
   sendMagicLinkEmail,
   sendTenantVerificationEmail,
+  sendCriticalActionVerificationEmail,
 };
