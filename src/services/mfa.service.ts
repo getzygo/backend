@@ -301,7 +301,13 @@ export async function enableMfa(
 export async function verifyMfaCode(
   userId: string,
   code: string
-): Promise<{ verified: boolean; error?: string }> {
+): Promise<{
+  verified: boolean;
+  error?: string;
+  warning?: string;
+  remaining_codes?: number;
+  codes_low?: boolean;
+}> {
   const db = getDb();
 
   const user = await db.query.users.findFirst({
@@ -338,6 +344,11 @@ export async function verifyMfaCode(
       const updatedCodes = [...backupCodes];
       updatedCodes.splice(codeIndex, 1);
 
+      // SECURITY: Check remaining codes and warn if low
+      const MINIMUM_BACKUP_CODES = 3;
+      const remainingCodes = updatedCodes.length;
+      const codesLow = remainingCodes < MINIMUM_BACKUP_CODES;
+
       await db
         .update(users)
         .set({
@@ -346,7 +357,17 @@ export async function verifyMfaCode(
         })
         .where(eq(users.id, userId));
 
-      return { verified: true };
+      // Return warning if codes are low
+      if (codesLow) {
+        return {
+          verified: true,
+          warning: `Only ${remainingCodes} backup code(s) remaining. Please regenerate backup codes in your security settings.`,
+          remaining_codes: remainingCodes,
+          codes_low: true,
+        };
+      }
+
+      return { verified: true, remaining_codes: remainingCodes };
     }
   }
 
