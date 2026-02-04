@@ -22,6 +22,13 @@
       "when": 1770025018434,
       "tag": "0002_right_miracleman",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1770206284471,
+      "tag": "0003_cooing_gertrude_yorkes",
+      "breakpoints": true
     }
   ]
 }

@@ -113,6 +113,7 @@ export async function createAuditLog(entry: AuditLogEntry): Promise<void> {
   try {
     await db.insert(auditLogs).values({
       userId: entry.userId,
+      tenantId: entry.tenantId, // Tenant context for multi-tenant audit trail
       action: entry.action,
       resourceType: entry.resourceType,
       resourceId: entry.resourceId,

@@ -289,9 +289,10 @@ app.patch(
       );
     }
 
-    // Audit log
+    // Audit log with tenant context
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId, // Tenant context for audit trail
       action: 'tenant_general_settings_updated',
       resourceType: 'tenant',
       resourceId: tenantId,

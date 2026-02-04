@@ -167,6 +167,8 @@ export const auditLogs = pgTable(
   {
     id: uuid('id').primaryKey().defaultRandom(),
     userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    // Tenant context for multi-tenant audit trail (SOC2/GDPR compliance)
+    tenantId: uuid('tenant_id'),
 
     action: varchar('action', { length: 100 }).notNull(),
     // signup, login, logout, password_change, oauth_link, etc.
@@ -186,6 +188,7 @@ export const auditLogs = pgTable(
   },
   (table) => ({
     userIdx: index('idx_audit_logs_user').on(table.userId),
+    tenantIdx: index('idx_audit_logs_tenant').on(table.tenantId),
     actionIdx: index('idx_audit_logs_action').on(table.action),
     createdAtIdx: index('idx_audit_logs_created_at').on(table.createdAt),
   })
