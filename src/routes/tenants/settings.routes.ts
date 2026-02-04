@@ -131,6 +131,7 @@ app.get('/:tenantId/settings', async (c) => {
           line2: settings.general.address.line2,
           city: settings.general.address.city,
           state_province: settings.general.address.stateProvince,
+          state_code: settings.general.address.stateCode,
           postal_code: settings.general.address.postalCode,
           country: settings.general.address.country,
         },
@@ -189,6 +190,7 @@ const updateGeneralSettingsSchema = z.object({
   address_line2: z.string().max(255).optional().nullable(),
   city: z.string().max(100).optional().nullable(),
   state_province: z.string().max(100).optional().nullable(),
+  state_code: z.string().max(10).optional().nullable(),
   postal_code: z.string().max(20).optional().nullable(),
   country: z.string().length(2).optional().nullable(),
   primary_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().nullable(),
@@ -246,6 +248,7 @@ app.patch(
     if (updates.address_line2 !== undefined) serviceUpdates.addressLine2 = updates.address_line2 ?? undefined;
     if (updates.city !== undefined) serviceUpdates.city = updates.city ?? undefined;
     if (updates.state_province !== undefined) serviceUpdates.stateProvince = updates.state_province ?? undefined;
+    if (updates.state_code !== undefined) serviceUpdates.stateCode = updates.state_code ?? undefined;
     if (updates.postal_code !== undefined) serviceUpdates.postalCode = updates.postal_code ?? undefined;
     if (updates.country !== undefined) serviceUpdates.country = updates.country ?? undefined;
     if (updates.primary_color !== undefined) serviceUpdates.primaryColor = updates.primary_color ?? undefined;

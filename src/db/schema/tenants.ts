@@ -74,6 +74,7 @@ export const tenants = pgTable(
     addressLine2: varchar('address_line2', { length: 255 }),
     city: varchar('city', { length: 100 }),
     stateProvince: varchar('state_province', { length: 100 }),
+    stateCode: varchar('state_code', { length: 10 }),
     postalCode: varchar('postal_code', { length: 20 }),
     country: varchar('country', { length: 2 }), // ISO 3166-1 alpha-2
 

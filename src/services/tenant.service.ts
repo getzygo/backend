@@ -594,6 +594,7 @@ export interface TenantSettings {
       line2: string | null;
       city: string | null;
       stateProvince: string | null;
+      stateCode: string | null;
       postalCode: string | null;
       country: string | null;
     };
@@ -657,6 +658,7 @@ export async function getTenantSettings(tenantId: string): Promise<TenantSetting
         line2: tenant.addressLine2,
         city: tenant.city,
         stateProvince: tenant.stateProvince,
+        stateCode: tenant.stateCode,
         postalCode: tenant.postalCode,
         country: tenant.country,
       },
@@ -710,6 +712,7 @@ export async function updateTenantGeneralSettings(
     addressLine2?: string;
     city?: string;
     stateProvince?: string;
+    stateCode?: string;
     postalCode?: string;
     country?: string;
     primaryColor?: string;
