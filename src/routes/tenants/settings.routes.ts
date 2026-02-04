@@ -237,21 +237,22 @@ app.patch(
     }
 
     // Convert snake_case to camelCase for the service
-    const serviceUpdates: Parameters<typeof updateTenantGeneralSettings>[1] = {};
+    // Note: null values should be saved as null (to clear fields), not converted to undefined
+    const serviceUpdates: Record<string, any> = {};
     if (updates.name !== undefined) serviceUpdates.name = updates.name;
-    if (updates.industry !== undefined) serviceUpdates.industry = updates.industry ?? undefined;
-    if (updates.company_size !== undefined) serviceUpdates.companySize = updates.company_size ?? undefined;
-    if (updates.website !== undefined) serviceUpdates.website = updates.website ?? undefined;
-    if (updates.phone !== undefined) serviceUpdates.phone = updates.phone ?? undefined;
-    if (updates.phone_country_code !== undefined) serviceUpdates.phoneCountryCode = updates.phone_country_code ?? undefined;
-    if (updates.address_line1 !== undefined) serviceUpdates.addressLine1 = updates.address_line1 ?? undefined;
-    if (updates.address_line2 !== undefined) serviceUpdates.addressLine2 = updates.address_line2 ?? undefined;
-    if (updates.city !== undefined) serviceUpdates.city = updates.city ?? undefined;
-    if (updates.state_province !== undefined) serviceUpdates.stateProvince = updates.state_province ?? undefined;
-    if (updates.state_code !== undefined) serviceUpdates.stateCode = updates.state_code ?? undefined;
-    if (updates.postal_code !== undefined) serviceUpdates.postalCode = updates.postal_code ?? undefined;
-    if (updates.country !== undefined) serviceUpdates.country = updates.country ?? undefined;
-    if (updates.primary_color !== undefined) serviceUpdates.primaryColor = updates.primary_color ?? undefined;
+    if (updates.industry !== undefined) serviceUpdates.industry = updates.industry;
+    if (updates.company_size !== undefined) serviceUpdates.companySize = updates.company_size;
+    if (updates.website !== undefined) serviceUpdates.website = updates.website;
+    if (updates.phone !== undefined) serviceUpdates.phone = updates.phone;
+    if (updates.phone_country_code !== undefined) serviceUpdates.phoneCountryCode = updates.phone_country_code;
+    if (updates.address_line1 !== undefined) serviceUpdates.addressLine1 = updates.address_line1;
+    if (updates.address_line2 !== undefined) serviceUpdates.addressLine2 = updates.address_line2;
+    if (updates.city !== undefined) serviceUpdates.city = updates.city;
+    if (updates.state_province !== undefined) serviceUpdates.stateProvince = updates.state_province;
+    if (updates.state_code !== undefined) serviceUpdates.stateCode = updates.state_code;
+    if (updates.postal_code !== undefined) serviceUpdates.postalCode = updates.postal_code;
+    if (updates.country !== undefined) serviceUpdates.country = updates.country;
+    if (updates.primary_color !== undefined) serviceUpdates.primaryColor = updates.primary_color;
 
     const updated = await updateTenantGeneralSettings(tenantId, serviceUpdates);
 
@@ -337,16 +338,17 @@ app.patch(
     }
 
     // Convert snake_case to camelCase for the service
-    const serviceUpdates: Parameters<typeof updateTenantLegalSettings>[1] = {};
-    if (updates.company_legal_name !== undefined) serviceUpdates.companyLegalName = updates.company_legal_name ?? undefined;
-    if (updates.business_type !== undefined) serviceUpdates.businessType = updates.business_type ?? undefined;
+    // Note: null values should be saved as null (to clear fields), not converted to undefined
+    const serviceUpdates: Record<string, any> = {};
+    if (updates.company_legal_name !== undefined) serviceUpdates.companyLegalName = updates.company_legal_name;
+    if (updates.business_type !== undefined) serviceUpdates.businessType = updates.business_type;
     if (updates.incorporation_date !== undefined) {
-      serviceUpdates.incorporationDate = updates.incorporation_date ? new Date(updates.incorporation_date) : undefined;
+      serviceUpdates.incorporationDate = updates.incorporation_date ? new Date(updates.incorporation_date) : null;
     }
-    if (updates.country_of_incorporation !== undefined) serviceUpdates.countryOfIncorporation = updates.country_of_incorporation ?? undefined;
-    if (updates.registration_number !== undefined) serviceUpdates.registrationNumber = updates.registration_number ?? undefined;
-    if (updates.tax_id !== undefined) serviceUpdates.taxId = updates.tax_id ?? undefined;
-    if (updates.vat_number !== undefined) serviceUpdates.vatNumber = updates.vat_number ?? undefined;
+    if (updates.country_of_incorporation !== undefined) serviceUpdates.countryOfIncorporation = updates.country_of_incorporation;
+    if (updates.registration_number !== undefined) serviceUpdates.registrationNumber = updates.registration_number;
+    if (updates.tax_id !== undefined) serviceUpdates.taxId = updates.tax_id;
+    if (updates.vat_number !== undefined) serviceUpdates.vatNumber = updates.vat_number;
 
     const updated = await updateTenantLegalSettings(tenantId, serviceUpdates);
 
@@ -440,17 +442,18 @@ app.patch(
     const oldBillingEmail = currentTenant?.billingEmail;
 
     // Convert snake_case to camelCase for the service
-    const serviceUpdates: Parameters<typeof updateTenantBillingSettings>[1] = {};
-    if (updates.billing_email !== undefined) serviceUpdates.billingEmail = updates.billing_email ?? undefined;
+    // Note: null values should be saved as null (to clear fields), not converted to undefined
+    const serviceUpdates: Record<string, any> = {};
+    if (updates.billing_email !== undefined) serviceUpdates.billingEmail = updates.billing_email;
     if (updates.use_different_address !== undefined) serviceUpdates.useDifferentBillingAddress = updates.use_different_address;
-    if (updates.billing_address !== undefined) serviceUpdates.billingAddress = updates.billing_address ?? undefined;
-    if (updates.billing_address_line2 !== undefined) serviceUpdates.billingAddressLine2 = updates.billing_address_line2 ?? undefined;
-    if (updates.billing_city !== undefined) serviceUpdates.billingCity = updates.billing_city ?? undefined;
-    if (updates.billing_state !== undefined) serviceUpdates.billingState = updates.billing_state ?? undefined;
-    if (updates.billing_postal_code !== undefined) serviceUpdates.billingPostalCode = updates.billing_postal_code ?? undefined;
-    if (updates.billing_country !== undefined) serviceUpdates.billingCountry = updates.billing_country ?? undefined;
-    if (updates.billing_phone !== undefined) serviceUpdates.billingPhone = updates.billing_phone ?? undefined;
-    if (updates.billing_phone_country_code !== undefined) serviceUpdates.billingPhoneCountryCode = updates.billing_phone_country_code ?? undefined;
+    if (updates.billing_address !== undefined) serviceUpdates.billingAddress = updates.billing_address;
+    if (updates.billing_address_line2 !== undefined) serviceUpdates.billingAddressLine2 = updates.billing_address_line2;
+    if (updates.billing_city !== undefined) serviceUpdates.billingCity = updates.billing_city;
+    if (updates.billing_state !== undefined) serviceUpdates.billingState = updates.billing_state;
+    if (updates.billing_postal_code !== undefined) serviceUpdates.billingPostalCode = updates.billing_postal_code;
+    if (updates.billing_country !== undefined) serviceUpdates.billingCountry = updates.billing_country;
+    if (updates.billing_phone !== undefined) serviceUpdates.billingPhone = updates.billing_phone;
+    if (updates.billing_phone_country_code !== undefined) serviceUpdates.billingPhoneCountryCode = updates.billing_phone_country_code;
 
     const updated = await updateTenantBillingSettings(tenantId, serviceUpdates);
 
