@@ -8,11 +8,13 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { authMiddleware } from '../../middleware/auth.middleware';
-import { emailService, sendWelcomeEmail } from '../../services/email.service';
+import { emailService } from '../../services/email.service';
 import { getDb } from '../../db/client';
-import { users, auditLogs } from '../../db/schema';
+import { users, auditLogs, tenantMembers } from '../../db/schema';
+import { notify } from '../../services/notification-hub.service';
+import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from '../../services/notification-configs';
 import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
@@ -102,10 +104,32 @@ app.post('/public', zValidator('json', verifyEmailPublicSchema), async (c) => {
     status: 'success',
   });
 
-  // Send welcome email (non-blocking)
-  sendWelcomeEmail(normalizedEmail, user.firstName || undefined).catch((err) => {
-    console.error('Failed to send welcome email:', err);
+  // Get user's primary tenant for in-app notification
+  const membership = await db.query.tenantMembers.findFirst({
+    where: and(
+      eq(tenantMembers.userId, user.id),
+      eq(tenantMembers.status, 'active')
+    ),
+    columns: { tenantId: true },
   });
+
+  // Send welcome notification (email + in-app)
+  const config = NOTIFICATION_CONFIGS.welcome;
+  notify({
+    userId: user.id,
+    tenantId: membership?.tenantId,
+    category: config.category,
+    type: config.type,
+    title: config.title,
+    message: config.message as string,
+    severity: config.severity,
+    actionRoute: config.actionRoute,
+    actionLabel: config.actionLabel,
+    emailTemplate: EMAIL_TEMPLATES.welcome({
+      firstName: user.firstName || undefined,
+    }),
+    emailSubject: config.emailSubject,
+  }).catch((err) => console.error('[Welcome] Notification failed:', err));
 
   return c.json({
     verified: true,
@@ -168,10 +192,32 @@ app.post('/', authMiddleware, zValidator('json', verifyEmailSchema), async (c) =
     status: 'success',
   });
 
-  // Send welcome email (non-blocking)
-  sendWelcomeEmail(user.email, user.firstName || undefined).catch((err) => {
-    console.error('Failed to send welcome email:', err);
+  // Get user's primary tenant for in-app notification
+  const membership = await db.query.tenantMembers.findFirst({
+    where: and(
+      eq(tenantMembers.userId, user.id),
+      eq(tenantMembers.status, 'active')
+    ),
+    columns: { tenantId: true },
   });
+
+  // Send welcome notification (email + in-app)
+  const config = NOTIFICATION_CONFIGS.welcome;
+  notify({
+    userId: user.id,
+    tenantId: membership?.tenantId,
+    category: config.category,
+    type: config.type,
+    title: config.title,
+    message: config.message as string,
+    severity: config.severity,
+    actionRoute: config.actionRoute,
+    actionLabel: config.actionLabel,
+    emailTemplate: EMAIL_TEMPLATES.welcome({
+      firstName: user.firstName || undefined,
+    }),
+    emailSubject: config.emailSubject,
+  }).catch((err) => console.error('[Welcome] Notification failed:', err));
 
   return c.json({
     verified: true,

@@ -152,13 +152,14 @@ export async function getUserSessions(
 
 /**
  * Revoke a specific session.
+ * Returns the revoked session details for email notification, or null if not found.
  */
 export async function revokeSession(
   sessionId: string,
   userId: string,
   ipAddress?: string,
   userAgent?: string
-): Promise<boolean> {
+): Promise<{ deviceName?: string | null; browser?: string | null; os?: string | null; locationCity?: string | null; locationCountry?: string | null } | null> {
   const db = getDb();
 
   // Verify the session belongs to the user
@@ -171,7 +172,7 @@ export async function revokeSession(
   });
 
   if (!session) {
-    return false;
+    return null;
   }
 
   // Revoke the session
@@ -196,7 +197,14 @@ export async function revokeSession(
     status: 'success',
   });
 
-  return true;
+  // Return session details for email notification
+  return {
+    deviceName: session.deviceName,
+    browser: session.browser,
+    os: session.os,
+    locationCity: session.locationCity,
+    locationCountry: session.locationCountry,
+  };
 }
 
 /**

@@ -14,12 +14,10 @@ import { z } from 'zod';
 import { authMiddleware, requireEmailVerified } from '../../middleware/auth.middleware';
 import { mfaService } from '../../services/mfa.service';
 import { getDb } from '../../db/client';
-import { auditLogs } from '../../db/schema';
-import {
-  sendMfaEnabledEmail,
-  sendMfaDisabledEmail,
-  sendBackupCodesRegeneratedEmail,
-} from '../../services/email.service';
+import { auditLogs, tenantMembers } from '../../db/schema';
+import { eq, and } from 'drizzle-orm';
+import { notify } from '../../services/notification-hub.service';
+import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from '../../services/notification-configs';
 import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
@@ -124,10 +122,33 @@ app.post(
       status: 'success',
     });
 
-    // Send MFA enabled notification email (ALLOW_DISABLE - user can turn this off)
-    sendMfaEnabledEmail(user.email, user.firstName || undefined, 'totp').catch((err) => {
-      console.error('Failed to send MFA enabled email:', err);
+    // Get user's primary tenant for in-app notification
+    const membership = await db.query.tenantMembers.findFirst({
+      where: and(
+        eq(tenantMembers.userId, user.id),
+        eq(tenantMembers.status, 'active')
+      ),
+      columns: { tenantId: true },
     });
+
+    // Send MFA enabled notification (email + in-app)
+    const config = NOTIFICATION_CONFIGS.mfa_enabled;
+    notify({
+      userId: user.id,
+      tenantId: membership?.tenantId,
+      category: config.category,
+      type: config.type,
+      title: config.title,
+      message: config.message as string,
+      severity: config.severity,
+      actionRoute: config.actionRoute,
+      actionLabel: config.actionLabel,
+      emailTemplate: EMAIL_TEMPLATES.mfaEnabled({
+        firstName: user.firstName || undefined,
+        method: 'totp',
+      }),
+      emailSubject: config.emailSubject,
+    }).catch((err) => console.error('[MFA] Notification failed:', err));
 
     return c.json({
       enabled: true,
@@ -228,13 +249,34 @@ app.post(
       status: 'success',
     });
 
-    // Send MFA disabled notification email (ALWAYS_SEND - cannot be disabled)
-    sendMfaDisabledEmail(user.email, user.firstName || undefined, {
-      ipAddress: ipAddress || undefined,
-      deviceInfo: userAgent || undefined,
-    }).catch((err) => {
-      console.error('Failed to send MFA disabled email:', err);
+    // Get user's primary tenant for in-app notification
+    const membership = await db.query.tenantMembers.findFirst({
+      where: and(
+        eq(tenantMembers.userId, user.id),
+        eq(tenantMembers.status, 'active')
+      ),
+      columns: { tenantId: true },
     });
+
+    // Send MFA disabled notification (email + in-app) - ALWAYS_SEND
+    const config = NOTIFICATION_CONFIGS.mfa_disabled;
+    notify({
+      userId: user.id,
+      tenantId: membership?.tenantId,
+      category: config.category,
+      type: config.type,
+      title: config.title,
+      message: config.message as string,
+      severity: config.severity,
+      actionRoute: config.actionRoute,
+      actionLabel: config.actionLabel,
+      emailTemplate: EMAIL_TEMPLATES.mfaDisabled({
+        firstName: user.firstName || undefined,
+        ipAddress: ipAddress || undefined,
+        deviceInfo: userAgent || undefined,
+      }),
+      emailSubject: config.emailSubject,
+    }).catch((err) => console.error('[MFA] Notification failed:', err));
 
     return c.json({
       disabled: true,
@@ -293,13 +335,34 @@ app.post(
       status: 'success',
     });
 
-    // Send backup codes regenerated notification email (ALLOW_DISABLE)
-    sendBackupCodesRegeneratedEmail(user.email, user.firstName || undefined, {
-      ipAddress: ipAddress || undefined,
-      deviceInfo: userAgent || undefined,
-    }).catch((err) => {
-      console.error('Failed to send backup codes regenerated email:', err);
+    // Get user's primary tenant for in-app notification
+    const membership = await db.query.tenantMembers.findFirst({
+      where: and(
+        eq(tenantMembers.userId, user.id),
+        eq(tenantMembers.status, 'active')
+      ),
+      columns: { tenantId: true },
     });
+
+    // Send backup codes regenerated notification (email + in-app)
+    const config = NOTIFICATION_CONFIGS.backup_codes;
+    notify({
+      userId: user.id,
+      tenantId: membership?.tenantId,
+      category: config.category,
+      type: config.type,
+      title: config.title,
+      message: config.message as string,
+      severity: config.severity,
+      actionRoute: config.actionRoute,
+      actionLabel: config.actionLabel,
+      emailTemplate: EMAIL_TEMPLATES.backupCodesRegenerated({
+        firstName: user.firstName || undefined,
+        ipAddress: ipAddress || undefined,
+        deviceInfo: userAgent || undefined,
+      }),
+      emailSubject: config.emailSubject,
+    }).catch((err) => console.error('[MFA] Notification failed:', err));
 
     return c.json({
       backup_codes: result.codes,

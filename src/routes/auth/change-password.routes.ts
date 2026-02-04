@@ -12,14 +12,15 @@
 import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { authMiddleware } from '../../middleware/auth.middleware';
 import { getDb } from '../../db/client';
-import { users, auditLogs } from '../../db/schema';
+import { users, auditLogs, tenantMembers } from '../../db/schema';
 import { verifyPassword, hashPassword } from '../../services/user.service';
 import { updateAuthUser, signOut } from '../../services/supabase.service';
 import { invalidateAuthToken } from '../../services/auth-token.service';
-import { sendPasswordChangedEmail } from '../../services/email.service';
+import { notify } from '../../services/notification-hub.service';
+import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from '../../services/notification-configs';
 
 const app = new Hono();
 
@@ -129,13 +130,34 @@ app.post('/', authMiddleware, zValidator('json', changePasswordSchema), async (c
     status: 'success',
   });
 
-  // Send password changed notification email (ALWAYS_SEND - cannot be disabled)
-  sendPasswordChangedEmail(user.email, user.firstName || undefined, {
-    ipAddress: ipAddress || undefined,
-    deviceInfo: userAgent || undefined,
-  }).catch((err) => {
-    console.error('Failed to send password changed email:', err);
+  // Get user's primary tenant for in-app notification
+  const membership = await db.query.tenantMembers.findFirst({
+    where: and(
+      eq(tenantMembers.userId, user.id),
+      eq(tenantMembers.status, 'active')
+    ),
+    columns: { tenantId: true },
   });
+
+  // Send password changed notification (email + in-app) - ALWAYS_SEND
+  const config = NOTIFICATION_CONFIGS.password_changed;
+  notify({
+    userId: user.id,
+    tenantId: membership?.tenantId,
+    category: config.category,
+    type: config.type,
+    title: config.title,
+    message: config.message as string,
+    severity: config.severity,
+    actionRoute: config.actionRoute,
+    actionLabel: config.actionLabel,
+    emailTemplate: EMAIL_TEMPLATES.passwordChanged({
+      firstName: user.firstName || undefined,
+      ipAddress: ipAddress || undefined,
+      deviceInfo: userAgent || undefined,
+    }),
+    emailSubject: config.emailSubject,
+  }).catch((err) => console.error('[Password] Notification failed:', err));
 
   // Invalidate current session - user must re-login with new password
   // Get the auth token from the request header

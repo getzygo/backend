@@ -81,7 +81,7 @@ function isSmtpConfigured(): boolean {
 /**
  * Send an email using a React Email template
  */
-async function sendEmail({ to, subject, template, headers = {} }: SendEmailOptions): Promise<SendEmailResult> {
+export async function sendEmail({ to, subject, template, headers = {} }: SendEmailOptions): Promise<SendEmailResult> {
   const env = getEnv();
 
   try {
@@ -107,6 +107,9 @@ async function sendEmail({ to, subject, template, headers = {} }: SendEmailOptio
         ...headers,
       },
     });
+
+    // Log successful email sends in production for tracking
+    console.log(`[Email] Sent "${subject}" to ${to}`);
 
     return { sent: true };
   } catch (error) {

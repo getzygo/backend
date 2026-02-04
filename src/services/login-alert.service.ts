@@ -12,10 +12,11 @@
 import { eq, desc, and, isNull, gt } from 'drizzle-orm';
 import crypto from 'crypto';
 import { getDb } from '../db/client';
-import { loginAlerts, userSessions, users, securityAlertLog } from '../db/schema';
+import { loginAlerts, userSessions, users, securityAlertLog, tenantMembers } from '../db/schema';
 import { parseUserAgent, createDeviceHash } from './device-fingerprint.service';
 import { getLocationFromIP, isLocationSignificantlyDifferent, formatLocation } from './geolocation.service';
-import { sendLoginAlertEmail } from './email.service';
+import { notify } from './notification-hub.service';
+import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from './notification-configs';
 import type { LoginAlert, NewLoginAlert } from '../db/schema/security';
 
 // Alert cooldowns to prevent spam (in milliseconds)
@@ -252,15 +253,50 @@ export async function checkLoginForAlerts(options: CheckLoginOptions): Promise<L
         });
       }
 
-      // Send notification email
-      await sendLoginAlertEmail(user.email, user.firstName || undefined, {
-        alerts: result.alerts,
-        device: currentDevice.deviceName,
-        browser: currentDevice.browser,
-        os: currentDevice.os,
-        location: formatLocation(currentLocation),
-        ipAddress,
-        isSuspicious: result.isSuspicious,
+      // Get user's primary tenant for in-app notification
+      const membership = await db.query.tenantMembers.findFirst({
+        where: and(
+          eq(tenantMembers.userId, userId),
+          eq(tenantMembers.status, 'active')
+        ),
+        columns: { tenantId: true },
+      });
+
+      // Send notification (email + in-app)
+      const config = result.isSuspicious
+        ? NOTIFICATION_CONFIGS.suspicious_login
+        : NOTIFICATION_CONFIGS.login_alert;
+
+      const messageFunc = config.message as (details?: Record<string, unknown>) => string;
+      const formattedLocation = formatLocation(currentLocation);
+
+      await notify({
+        userId,
+        tenantId: membership?.tenantId,
+        category: config.category,
+        type: config.type,
+        title: config.title,
+        message: messageFunc({ device: currentDevice.deviceName, location: formattedLocation }),
+        severity: config.severity,
+        actionRoute: config.actionRoute,
+        actionLabel: config.actionLabel,
+        emailTemplate: EMAIL_TEMPLATES.loginAlert({
+          firstName: user.firstName || undefined,
+          alerts: result.alerts,
+          device: currentDevice.deviceName,
+          browser: currentDevice.browser,
+          os: currentDevice.os,
+          location: formattedLocation,
+          ipAddress,
+          isSuspicious: result.isSuspicious,
+        }),
+        emailSubject: result.isSuspicious
+          ? 'Suspicious sign-in detected - Zygo'
+          : config.emailSubject,
+        metadata: {
+          alerts: result.alerts,
+          isSuspicious: result.isSuspicious,
+        },
       });
     }
   }

@@ -44,7 +44,8 @@ import { hasPermission } from '../../services/permission.service';
 import { getDb } from '../../db/client';
 import { auditLogs } from '../../db/schema';
 import type { User } from '../../db/schema';
-import { sendPrimaryContactChangedEmail } from '../../services/email.service';
+import { notify, sendEmail } from '../../services/notification-hub.service';
+import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from '../../services/notification-configs';
 
 const app = new Hono();
 
@@ -192,13 +193,36 @@ app.post(
       );
     }
 
-    // Send notification for primary contact creation
+    // Send notification for primary contact creation (email + in-app) - ALWAYS_SEND
     if (body.type === 'primary') {
-      await sendPrimaryContactChangedEmail(body.email, {
-        contactName: body.name,
-        action: 'added',
-        changedBy: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
-      });
+      const changedBy = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+      const config = NOTIFICATION_CONFIGS.primary_contact_added;
+
+      // Send email to the new primary contact
+      sendEmail({
+        to: body.email,
+        subject: config.emailSubject,
+        template: EMAIL_TEMPLATES.primaryContactChanged({
+          contactName: body.name,
+          action: 'added',
+          changedBy,
+          isNewAddress: true,
+        }),
+      }).catch((err) => console.error('[Contacts] Notification failed:', err));
+
+      // Create in-app notification for the user making the change
+      notify({
+        userId: user.id,
+        tenantId,
+        category: config.category,
+        type: config.type,
+        title: config.title,
+        message: config.message as string,
+        severity: config.severity,
+        actionRoute: config.actionRoute,
+        actionLabel: config.actionLabel,
+        metadata: { contactEmail: body.email, contactName: body.name },
+      }).catch((err) => console.error('[Contacts] In-app notification failed:', err));
     }
 
     // Audit log
@@ -322,23 +346,48 @@ app.patch(
       );
     }
 
-    // Send notification for primary contact email change
+    // Send notification for primary contact email change (email + in-app) - ALWAYS_SEND
     if (existing.type === 'primary' && updates.email && updates.email !== existing.email) {
+      const changedBy = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+      const updateConfig = NOTIFICATION_CONFIGS.primary_contact_updated;
+
       // Notify old email
-      await sendPrimaryContactChangedEmail(existing.email, {
-        contactName: existing.name,
-        action: 'updated',
-        changedBy: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
-        newEmail: updates.email,
-      });
+      sendEmail({
+        to: existing.email,
+        subject: updateConfig.emailSubject,
+        template: EMAIL_TEMPLATES.primaryContactChanged({
+          contactName: existing.name,
+          action: 'updated',
+          changedBy,
+          newEmail: updates.email,
+        }),
+      }).catch((err) => console.error('[Contacts] Notification to old email failed:', err));
 
       // Notify new email
-      await sendPrimaryContactChangedEmail(updates.email, {
-        contactName: updates.name || existing.name,
-        action: 'added',
-        changedBy: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
-        isNewAddress: true,
-      });
+      sendEmail({
+        to: updates.email,
+        subject: 'You are now the primary contact - Zygo',
+        template: EMAIL_TEMPLATES.primaryContactChanged({
+          contactName: updates.name || existing.name,
+          action: 'added',
+          changedBy,
+          isNewAddress: true,
+        }),
+      }).catch((err) => console.error('[Contacts] Notification to new email failed:', err));
+
+      // Create in-app notification for the user making the change
+      notify({
+        userId: user.id,
+        tenantId,
+        category: updateConfig.category,
+        type: updateConfig.type,
+        title: updateConfig.title,
+        message: updateConfig.message as string,
+        severity: updateConfig.severity,
+        actionRoute: updateConfig.actionRoute,
+        actionLabel: updateConfig.actionLabel,
+        metadata: { oldEmail: existing.email, newEmail: updates.email },
+      }).catch((err) => console.error('[Contacts] In-app notification failed:', err));
     }
 
     // Audit log
@@ -443,13 +492,35 @@ app.delete('/:tenantId/contacts/:contactId', async (c) => {
     );
   }
 
-  // Send notification for primary contact deletion
+  // Send notification for primary contact deletion (email + in-app) - ALWAYS_SEND
   if (existing.type === 'primary') {
-    await sendPrimaryContactChangedEmail(existing.email, {
-      contactName: existing.name,
-      action: 'removed',
-      changedBy: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
-    });
+    const changedBy = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+    const removeConfig = NOTIFICATION_CONFIGS.primary_contact_removed;
+
+    // Notify the removed contact
+    sendEmail({
+      to: existing.email,
+      subject: removeConfig.emailSubject,
+      template: EMAIL_TEMPLATES.primaryContactChanged({
+        contactName: existing.name,
+        action: 'removed',
+        changedBy,
+      }),
+    }).catch((err) => console.error('[Contacts] Notification failed:', err));
+
+    // Create in-app notification for the user making the change
+    notify({
+      userId: user.id,
+      tenantId,
+      category: removeConfig.category,
+      type: removeConfig.type,
+      title: removeConfig.title,
+      message: removeConfig.message as string,
+      severity: removeConfig.severity,
+      actionRoute: removeConfig.actionRoute,
+      actionLabel: removeConfig.actionLabel,
+      metadata: { contactEmail: existing.email, contactName: existing.name },
+    }).catch((err) => console.error('[Contacts] In-app notification failed:', err));
   }
 
   // Audit log

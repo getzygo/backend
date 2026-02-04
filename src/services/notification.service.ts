@@ -37,7 +37,12 @@ export type NotificationCategory =
   | 'phone_verification_first'
   | 'phone_verification_final'
   | 'trial_expiration_first'
-  | 'trial_expiration_final';
+  | 'trial_expiration_final'
+  // Tenant/workspace categories
+  | 'billing_email_changed'
+  | 'primary_contact_changed'
+  | 'tenant_deletion_requested'
+  | 'tenant_deletion_cancelled';
 export type NotificationSeverity = 'info' | 'warning' | 'danger' | 'success';
 
 // Server-side policy - NOT controlled by UI toggles
@@ -63,6 +68,11 @@ export const ALERT_POLICIES = {
   // Trial reminders can be disabled by user
   trial_expiration_first: 'ALLOW_DISABLE',
   trial_expiration_final: 'ALLOW_DISABLE',
+  // Tenant/workspace policies - All critical, cannot be disabled
+  billing_email_changed: 'ALWAYS_SEND',
+  primary_contact_changed: 'ALWAYS_SEND',
+  tenant_deletion_requested: 'ALWAYS_SEND',
+  tenant_deletion_cancelled: 'ALWAYS_SEND',
 } as const;
 
 interface CreateNotificationOptions {
@@ -427,6 +437,58 @@ export async function isCategoryEnabled(
   return true;
 }
 
+/**
+ * Define which permissions are required to see each notification category.
+ * Categories not listed here are visible to all users.
+ */
+export const CATEGORY_VISIBILITY: Partial<Record<NotificationCategory, string[]>> = {
+  // Billing notifications - only visible to users who can update billing
+  billing_email_changed: ['canUpdateBillingInfo'],
+  // Contact notifications - only visible to users who can manage tenant settings
+  primary_contact_changed: ['canManageTenantSettings'],
+};
+
+/**
+ * Get notification categories visible to a user based on their permissions.
+ * Returns filtered ALERT_POLICIES as a mutable record.
+ */
+export async function getVisibleAlertPolicies(
+  userId: string,
+  tenantId: string,
+  userPermissions: string[]
+): Promise<Record<string, 'ALWAYS_SEND' | 'ALLOW_DISABLE'>> {
+  const visiblePolicies: Record<string, 'ALWAYS_SEND' | 'ALLOW_DISABLE'> = {};
+
+  for (const [category, policy] of Object.entries(ALERT_POLICIES)) {
+    const requiredPermissions = CATEGORY_VISIBILITY[category as NotificationCategory];
+
+    // If no permissions required, or user has at least one required permission
+    if (!requiredPermissions || requiredPermissions.some(p => userPermissions.includes(p))) {
+      visiblePolicies[category] = policy;
+    }
+  }
+
+  return visiblePolicies;
+}
+
+/**
+ * Get list of notification categories visible to a user.
+ */
+export function getVisibleCategories(userPermissions: string[]): NotificationCategory[] {
+  const categories: NotificationCategory[] = [];
+
+  for (const category of Object.keys(ALERT_POLICIES)) {
+    const requiredPermissions = CATEGORY_VISIBILITY[category as NotificationCategory];
+
+    // If no permissions required, or user has at least one required permission
+    if (!requiredPermissions || requiredPermissions.some(p => userPermissions.includes(p))) {
+      categories.push(category as NotificationCategory);
+    }
+  }
+
+  return categories;
+}
+
 export const notificationService = {
   createNotification,
   getNotifications,
@@ -441,7 +503,10 @@ export const notificationService = {
   resumeNotifications,
   areNotificationsPaused,
   isCategoryEnabled,
+  getVisibleAlertPolicies,
+  getVisibleCategories,
   ALERT_POLICIES,
+  CATEGORY_VISIBILITY,
 };
 
 export default notificationService;

@@ -400,12 +400,13 @@ export async function getTenantsReadyForDeletion(): Promise<Tenant[]> {
  * Get all members of a tenant (for sending notifications)
  */
 export async function getTenantMemberEmails(tenantId: string): Promise<
-  Array<{ email: string; firstName: string | null; isOwner: boolean }>
+  Array<{ userId: string; email: string; firstName: string | null; isOwner: boolean }>
 > {
   const db = getDb();
 
   const members = await db
     .select({
+      userId: users.id,
       email: users.email,
       firstName: users.firstName,
       isOwner: tenantMembers.isOwner,

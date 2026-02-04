@@ -12,14 +12,16 @@ import { Hono } from 'hono';
 import { zValidator } from '@hono/zod-validator';
 import { z } from 'zod';
 import { randomInt, randomBytes } from 'crypto';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, auditLogs } from '../../db/schema';
+import { users, auditLogs, tenantMembers } from '../../db/schema';
 import { getRedis, REDIS_KEYS, REDIS_TTL } from '../../db/redis';
 import { getUserByEmail, hashPassword } from '../../services/user.service';
 import { updateAuthUser } from '../../services/supabase.service';
 import { getEnv } from '../../config/env';
-import { sendPasswordResetEmail, sendPasswordChangedEmail } from '../../services/email.service';
+import { sendPasswordResetEmail } from '../../services/email.service';
+import { notify } from '../../services/notification-hub.service';
+import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from '../../services/notification-configs';
 import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
@@ -354,15 +356,33 @@ app.post('/reset-password', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json',
     status: 'success',
   });
 
-  // Send confirmation email (ALWAYS_SEND - cannot be disabled)
-  try {
-    await sendPasswordChangedEmail(email, user.firstName || undefined, {
+  // Get user's primary tenant for in-app notification
+  const membership = await db.query.tenantMembers.findFirst({
+    where: and(
+      eq(tenantMembers.userId, user.id),
+      eq(tenantMembers.status, 'active')
+    ),
+    columns: { tenantId: true },
+  });
+
+  // Send password changed notification (email + in-app) - ALWAYS_SEND
+  const config = NOTIFICATION_CONFIGS.password_changed;
+  notify({
+    userId: user.id,
+    tenantId: membership?.tenantId,
+    category: config.category,
+    type: config.type,
+    title: config.title,
+    message: config.message as string,
+    severity: config.severity,
+    actionRoute: config.actionRoute,
+    actionLabel: config.actionLabel,
+    emailTemplate: EMAIL_TEMPLATES.passwordChanged({
+      firstName: user.firstName || undefined,
       ipAddress: ipAddress || undefined,
-    });
-  } catch (error) {
-    console.error('Failed to send password changed confirmation email:', error);
-    // Non-blocking - password was still reset
-  }
+    }),
+    emailSubject: config.emailSubject,
+  }).catch((err) => console.error('[Password] Notification failed:', err));
 
   return c.json({
     success: true,

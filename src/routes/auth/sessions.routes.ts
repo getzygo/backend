@@ -13,6 +13,12 @@ import {
   revokeSession,
   revokeAllSessions,
 } from '../../services/session.service';
+import { notify } from '../../services/notification-hub.service';
+import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from '../../services/notification-configs';
+import { parseUserAgent } from '../../services/device-fingerprint.service';
+import { getDb } from '../../db/client';
+import { tenantMembers } from '../../db/schema';
+import { eq, and } from 'drizzle-orm';
 
 const app = new Hono();
 
@@ -59,9 +65,9 @@ app.post('/:id/revoke', authMiddleware, async (c) => {
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
 
-  const success = await revokeSession(sessionId, user.id, ipAddress, userAgent);
+  const revokedSession = await revokeSession(sessionId, user.id, ipAddress, userAgent);
 
-  if (!success) {
+  if (!revokedSession) {
     return c.json(
       {
         error: 'session_not_found',
@@ -70,6 +76,47 @@ app.post('/:id/revoke', authMiddleware, async (c) => {
       404
     );
   }
+
+  // Send session revoked notification (email + in-app)
+  const currentDevice = parseUserAgent(userAgent);
+  const location = [revokedSession.locationCity, revokedSession.locationCountry]
+    .filter(Boolean)
+    .join(', ');
+
+  // Get user's primary tenant for in-app notification
+  const db = getDb();
+  const membership = await db.query.tenantMembers.findFirst({
+    where: and(
+      eq(tenantMembers.userId, user.id),
+      eq(tenantMembers.status, 'active')
+    ),
+    columns: { tenantId: true },
+  });
+
+  // Fire and forget - don't block the response
+  const config = NOTIFICATION_CONFIGS.session_revoked;
+  const messageFunc = config.message as (details?: Record<string, unknown>) => string;
+  notify({
+    userId: user.id,
+    tenantId: membership?.tenantId,
+    category: config.category,
+    type: config.type,
+    title: config.title,
+    message: messageFunc({ device: revokedSession.deviceName }),
+    severity: config.severity,
+    actionRoute: config.actionRoute,
+    actionLabel: config.actionLabel,
+    emailTemplate: EMAIL_TEMPLATES.sessionRevoked({
+      firstName: user.firstName ?? undefined,
+      revokedDevice: revokedSession.deviceName ?? undefined,
+      revokedBrowser: revokedSession.browser ?? undefined,
+      revokedLocation: location || undefined,
+      revokedBy: 'user',
+      revokerDevice: currentDevice.deviceName,
+    }),
+    emailSubject: config.emailSubject,
+    metadata: { revokedSessionId: sessionId },
+  }).catch((err) => console.error('[Session] Notification failed:', err));
 
   // Don't call signOutUser here - that would log out ALL sessions including the current one.
   // The revoked session's JWT will expire naturally (typically 1 hour).

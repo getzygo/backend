@@ -41,13 +41,9 @@ import { hasPermission } from '../../services/permission.service';
 import { getDb } from '../../db/client';
 import { auditLogs } from '../../db/schema';
 import type { User } from '../../db/schema';
-import {
-  sendBillingEmailChangedEmail,
-  sendPrimaryContactChangedEmail,
-  sendTenantDeletionRequestedEmail,
-  sendTenantDeletionCancelledEmail,
-  sendCriticalActionVerificationEmail,
-} from '../../services/email.service';
+import { sendCriticalActionVerificationEmail } from '../../services/email.service';
+import { notify } from '../../services/notification-hub.service';
+import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from '../../services/notification-configs';
 import {
   uploadCompanyLogo,
   getCompanyLogoFile,
@@ -491,22 +487,45 @@ app.patch(
       );
     }
 
-    // Send email notification if billing email changed
+    // Send notification if billing email changed (email + in-app) - ALWAYS_SEND
     if (updates.billing_email && oldBillingEmail && updates.billing_email !== oldBillingEmail) {
-      // Send to old email
-      await sendBillingEmailChangedEmail(oldBillingEmail, {
-        tenantName: currentTenant?.name,
-        newEmail: updates.billing_email,
-        changedBy: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
-      });
+      const changedBy = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+      const config = NOTIFICATION_CONFIGS.billing_email_changed;
+      const messageFunc = config.message as (details?: Record<string, unknown>) => string;
 
-      // Send to new email
-      await sendBillingEmailChangedEmail(updates.billing_email, {
-        tenantName: currentTenant?.name,
-        newEmail: updates.billing_email,
-        changedBy: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
-        isNewAddress: true,
-      });
+      // Notify old email address (email only - no in-app since user losing access)
+      notify({
+        userId: user.id,
+        tenantId,
+        category: config.category,
+        type: config.type,
+        title: config.title,
+        message: messageFunc({ isNewAddress: false }),
+        severity: config.severity,
+        actionRoute: config.actionRoute,
+        actionLabel: config.actionLabel,
+        emailTemplate: EMAIL_TEMPLATES.billingEmailChanged({
+          tenantName: currentTenant?.name,
+          newEmail: updates.billing_email,
+          changedBy,
+          isNewAddress: false,
+        }),
+        emailSubject: config.emailSubject,
+      }).catch((err) => console.error('[Billing] Notification to old email failed:', err));
+
+      // Notify new email address (email only for now - can't target in-app to non-user)
+      // Note: Using sendEmail directly since new billing email may not be a user
+      const { sendEmail } = await import('../../services/email.service');
+      sendEmail({
+        to: updates.billing_email,
+        subject: 'You are now the billing contact - Zygo',
+        template: EMAIL_TEMPLATES.billingEmailChanged({
+          tenantName: currentTenant?.name,
+          newEmail: updates.billing_email,
+          changedBy,
+          isNewAddress: true,
+        }),
+      }).catch((err) => console.error('[Billing] Notification to new email failed:', err));
     }
 
     // Audit log
@@ -1118,18 +1137,39 @@ app.post(
       status: 'success',
     });
 
-    // Send email notifications to all members
+    // Send notifications to all members (email + in-app) - ALWAYS_SEND
     const members = await getTenantMemberEmails(tenantId);
+    const requestedBy = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+    const config = NOTIFICATION_CONFIGS.tenant_deletion_requested;
+    const messageFunc = config.message as (details?: Record<string, unknown>) => string;
+
     for (const member of members) {
-      sendTenantDeletionRequestedEmail(member.email, {
-        firstName: member.firstName || undefined,
-        tenantName: tenant.name,
-        deletionScheduledAt: result.deletionScheduledAt!,
-        cancelableUntil: result.deletionCancelableUntil!,
-        requestedBy: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
-        reason,
+      notify({
+        userId: member.userId,
+        tenantId,
+        category: config.category,
+        type: config.type,
+        title: config.title,
+        message: messageFunc({ tenantName: tenant.name }),
+        severity: config.severity,
+        actionRoute: config.actionRoute,
+        actionLabel: config.actionLabel,
+        emailTemplate: EMAIL_TEMPLATES.tenantDeletionRequested({
+          firstName: member.firstName || undefined,
+          tenantName: tenant.name,
+          deletionScheduledAt: result.deletionScheduledAt!,
+          cancelableUntil: result.deletionCancelableUntil!,
+          requestedBy,
+          reason,
+        }),
+        emailSubject: `Workspace deletion scheduled - ${tenant.name}`,
+        metadata: {
+          deletionScheduledAt: result.deletionScheduledAt?.toISOString(),
+          cancelableUntil: result.deletionCancelableUntil?.toISOString(),
+          requestedBy,
+        },
       }).catch((err) => {
-        console.error(`[Settings] Failed to send deletion email to ${member.email}:`, err);
+        console.error(`[Settings] Failed to send deletion notification to ${member.email}:`, err);
       });
     }
 
@@ -1236,15 +1276,32 @@ app.delete('/:tenantId/settings/deletion', async (c) => {
     status: 'success',
   });
 
-  // Send email notifications to all members
+  // Send notifications to all members (email + in-app) - ALWAYS_SEND
   const members = await getTenantMemberEmails(tenantId);
+  const cancelledBy = `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email;
+  const cancelConfig = NOTIFICATION_CONFIGS.tenant_deletion_cancelled;
+  const cancelMessageFunc = cancelConfig.message as (details?: Record<string, unknown>) => string;
+
   for (const member of members) {
-    sendTenantDeletionCancelledEmail(member.email, {
-      firstName: member.firstName || undefined,
-      tenantName: tenant.name,
-      cancelledBy: `${user.firstName || ''} ${user.lastName || ''}`.trim() || user.email,
+    notify({
+      userId: member.userId,
+      tenantId,
+      category: cancelConfig.category,
+      type: cancelConfig.type,
+      title: cancelConfig.title,
+      message: cancelMessageFunc({ tenantName: tenant.name }),
+      severity: cancelConfig.severity,
+      actionRoute: cancelConfig.actionRoute,
+      actionLabel: cancelConfig.actionLabel,
+      emailTemplate: EMAIL_TEMPLATES.tenantDeletionCancelled({
+        firstName: member.firstName || undefined,
+        tenantName: tenant.name,
+        cancelledBy,
+      }),
+      emailSubject: `Workspace deletion cancelled - ${tenant.name}`,
+      metadata: { cancelledBy },
     }).catch((err) => {
-      console.error(`[Settings] Failed to send cancellation email to ${member.email}:`, err);
+      console.error(`[Settings] Failed to send cancellation notification to ${member.email}:`, err);
     });
   }
 

@@ -17,8 +17,14 @@ import { authMiddleware } from '../../middleware/auth.middleware';
 import { tenantMiddleware } from '../../middleware/tenant.middleware';
 import { requirePermission } from '../../middleware/permission.middleware';
 import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
-import { notificationService, ALERT_POLICIES } from '../../services/notification.service';
+import {
+  notificationService,
+  ALERT_POLICIES,
+  CATEGORY_VISIBILITY,
+  getVisibleAlertPolicies,
+} from '../../services/notification.service';
 import { auditService } from '../../services/audit.service';
+import { resolvePermissions } from '../../services/permission.service';
 
 const app = new Hono();
 
@@ -74,12 +80,29 @@ function getClientInfo(c: any): { ipAddress?: string; userAgent?: string } {
  * GET /api/v1/notifications/preferences
  * Get notification preferences for the current user in current tenant
  * Rate limit: 60 req/min
+ *
+ * Returns only notification categories the user has permission to see.
+ * For example, billing_email_changed is only shown to users with canUpdateBillingInfo.
  */
 app.get('/', rateLimit(RATE_LIMITS.STANDARD), async (c) => {
   const user = c.get('user');
   const tenant = c.get('tenant');
 
   const prefs = await notificationService.getOrCreatePreferences(user.id, tenant.id);
+
+  // Get user's permissions to filter visible notification categories
+  const userPermissions = await resolvePermissions(user.id, tenant.id);
+  const visiblePolicies = await getVisibleAlertPolicies(user.id, tenant.id, userPermissions);
+
+  // Filter category_preferences to only include visible categories
+  const filteredCategoryPrefs: Record<string, unknown> = {};
+  if (prefs.categoryPreferences) {
+    for (const [category, pref] of Object.entries(prefs.categoryPreferences as Record<string, unknown>)) {
+      if (category in visiblePolicies) {
+        filteredCategoryPrefs[category] = pref;
+      }
+    }
+  }
 
   return c.json({
     email_enabled: prefs.emailEnabled,
@@ -89,11 +112,11 @@ app.get('/', rateLimit(RATE_LIMITS.STANDARD), async (c) => {
     dnd_enabled: prefs.dndEnabled,
     dnd_start_time: prefs.dndStartTime,
     dnd_end_time: prefs.dndEndTime,
-    category_preferences: prefs.categoryPreferences,
+    category_preferences: filteredCategoryPrefs,
     paused_until: prefs.pausedUntil,
     is_paused: prefs.pausedUntil ? new Date(prefs.pausedUntil) > new Date() : false,
-    // Include policy info so frontend knows which categories can be disabled
-    alert_policies: ALERT_POLICIES,
+    // Include only visible policies so frontend knows which categories can be disabled
+    alert_policies: visiblePolicies,
   });
 });
 
@@ -162,6 +185,10 @@ app.patch(
 
     // Handle category preferences (convert from snake_case keys if needed)
     if (body.category_preferences) {
+      // Get user's permissions to filter visible notification categories
+      const userPermissions = await resolvePermissions(user.id, tenant.id);
+      const visiblePolicies = await getVisibleAlertPolicies(user.id, tenant.id, userPermissions);
+
       const categoryPrefs: Record<string, { email?: boolean; inApp?: boolean; sound?: boolean }> = {};
       const categoryChanges: Record<string, { old: unknown; new: unknown }> = {};
 
@@ -170,6 +197,12 @@ app.patch(
         const policy = ALERT_POLICIES[category as keyof typeof ALERT_POLICIES];
         if (policy === 'ALWAYS_SEND') {
           // Skip - cannot disable ALWAYS_SEND categories
+          continue;
+        }
+
+        // Check if user has permission to modify this category
+        if (!(category in visiblePolicies)) {
+          // Skip - user doesn't have permission to see/modify this category
           continue;
         }
 
