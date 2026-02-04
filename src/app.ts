@@ -39,17 +39,30 @@ export function createApp() {
           'http://localhost:3000',
           'https://getzygo.com',
           'https://zygo.tech',
+          'https://admin.zygo.tech',
+          'https://api.zygo.tech',
+          'https://docs.zygo.tech',
         ];
 
-        // Allow all zygo.tech subdomains (tenant apps: {slug}.zygo.tech)
-        if (origin && origin.endsWith('.zygo.tech')) {
-          return origin;
-        }
-
+        // Check exact matches first (known safe origins)
         if (!origin || allowedOrigins.includes(origin)) {
           return origin || '*';
         }
 
+        // SECURITY: Validate tenant subdomains with strict pattern
+        // Only allow: https://{valid-slug}.zygo.tech where slug is:
+        // - 2-50 characters
+        // - Lowercase alphanumeric and hyphens only
+        // - Must start and end with alphanumeric
+        // This prevents arbitrary subdomain access while allowing tenant apps
+        const tenantSubdomainPattern = /^https:\/\/([a-z0-9][a-z0-9-]{0,48}[a-z0-9])\.zygo\.tech$/;
+        const singleCharPattern = /^https:\/\/([a-z0-9])\.zygo\.tech$/; // Allow single char slugs too
+
+        if (tenantSubdomainPattern.test(origin) || singleCharPattern.test(origin)) {
+          return origin;
+        }
+
+        // Reject unknown origins
         return null;
       },
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
