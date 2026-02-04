@@ -681,6 +681,114 @@ export async function restoreMember(params: {
   };
 }
 
+/**
+ * Transfer data ownership from one user to another
+ * Updates the owner/creator fields on all user-owned data within a tenant
+ *
+ * Note: This function is a framework that will transfer data from tables
+ * as they are implemented. Currently handles:
+ * - (Add tables as they're created: workflows, agents, conversations, etc.)
+ */
+export async function transferDataOwnership(params: {
+  tenantId: string;
+  sourceUserId: string;
+  targetUserId: string;
+  transferredBy: string;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  summary: {
+    workflows: number;
+    agents: number;
+    conversations: number;
+    files: number;
+    total: number;
+  };
+}> {
+  const { tenantId, sourceUserId, targetUserId, transferredBy } = params;
+  const db = getDb();
+
+  // Verify both users are members of the tenant
+  const sourceMember = await getMemberByUserId(tenantId, sourceUserId);
+  const targetMember = await getMemberByUserId(tenantId, targetUserId);
+
+  if (!sourceMember) {
+    return {
+      success: false,
+      error: 'Source user is not a member of this workspace.',
+      summary: { workflows: 0, agents: 0, conversations: 0, files: 0, total: 0 },
+    };
+  }
+
+  if (!targetMember) {
+    return {
+      success: false,
+      error: 'Target user is not a member of this workspace.',
+      summary: { workflows: 0, agents: 0, conversations: 0, files: 0, total: 0 },
+    };
+  }
+
+  if (targetMember.status !== 'active') {
+    return {
+      success: false,
+      error: 'Target user must have an active membership.',
+      summary: { workflows: 0, agents: 0, conversations: 0, files: 0, total: 0 },
+    };
+  }
+
+  // Summary of transferred items
+  const summary = {
+    workflows: 0,
+    agents: 0,
+    conversations: 0,
+    files: 0,
+    total: 0,
+  };
+
+  // TODO: Transfer workflows
+  // When workflows table is implemented:
+  // const workflowResult = await db
+  //   .update(workflows)
+  //   .set({ ownerId: targetUserId, updatedAt: new Date() })
+  //   .where(and(eq(workflows.tenantId, tenantId), eq(workflows.ownerId, sourceUserId)))
+  //   .returning();
+  // summary.workflows = workflowResult.length;
+
+  // TODO: Transfer agents
+  // When agents table is implemented:
+  // const agentResult = await db
+  //   .update(agents)
+  //   .set({ createdBy: targetUserId, updatedAt: new Date() })
+  //   .where(and(eq(agents.tenantId, tenantId), eq(agents.createdBy, sourceUserId)))
+  //   .returning();
+  // summary.agents = agentResult.length;
+
+  // TODO: Transfer conversations
+  // When conversations table is implemented:
+  // const conversationResult = await db
+  //   .update(conversations)
+  //   .set({ userId: targetUserId, updatedAt: new Date() })
+  //   .where(and(eq(conversations.tenantId, tenantId), eq(conversations.userId, sourceUserId)))
+  //   .returning();
+  // summary.conversations = conversationResult.length;
+
+  // TODO: Transfer files/uploads
+  // When files table is implemented:
+  // const fileResult = await db
+  //   .update(files)
+  //   .set({ uploadedBy: targetUserId, updatedAt: new Date() })
+  //   .where(and(eq(files.tenantId, tenantId), eq(files.uploadedBy, sourceUserId)))
+  //   .returning();
+  // summary.files = fileResult.length;
+
+  summary.total = summary.workflows + summary.agents + summary.conversations + summary.files;
+
+  return {
+    success: true,
+    summary,
+  };
+}
+
 export const memberService = {
   getPlanUserLimit,
   countTenantMembers,
@@ -695,4 +803,5 @@ export const memberService = {
   unsuspendMember,
   removeMember,
   restoreMember,
+  transferDataOwnership,
 };

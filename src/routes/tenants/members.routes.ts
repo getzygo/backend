@@ -46,6 +46,7 @@ import {
   restoreMember,
   countTenantMembers,
   getPlanUserLimit,
+  transferDataOwnership,
 } from '../../services/member.service';
 import {
   createInvite,
@@ -1028,10 +1029,23 @@ app.post(
       );
     }
 
-    // TODO: Implement actual data transfer logic
-    // This would involve updating owner_id/created_by fields on:
-    // - Workflows, Agents, Conversations, etc.
-    // For now, just audit the request
+    // Perform the data transfer
+    const result = await transferDataOwnership({
+      tenantId,
+      sourceUserId: sourceMember.userId,
+      targetUserId: targetMember.userId,
+      transferredBy: user.id,
+    });
+
+    if (!result.success) {
+      return c.json(
+        {
+          error: 'transfer_failed',
+          message: result.error,
+        },
+        400
+      );
+    }
 
     // Audit
     await db.insert(auditLogs).values({
@@ -1043,6 +1057,7 @@ app.post(
         source_user_id: sourceMember.userId,
         target_user_id: targetMember.userId,
         target_member_id: targetMemberId,
+        items_transferred: result.summary,
       },
       ipAddress: ipAddress || undefined,
       userAgent: userAgent || undefined,
@@ -1051,6 +1066,7 @@ app.post(
 
     return c.json({
       message: 'Data ownership transferred successfully',
+      summary: result.summary,
     });
   }
 );
