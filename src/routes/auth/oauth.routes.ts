@@ -894,8 +894,8 @@ const completeSignupSchema = z.object({
   // User Details (optional - can be derived from OAuth profile)
   first_name: z.string().min(1).max(100).optional(),
   last_name: z.string().min(1).max(100).optional(),
-  // Password for OAuth users (set during signup flow)
-  password: z.string().min(12).optional(),
+  // Password is required for all users, including OAuth signups
+  password: z.string().min(12, 'Password must be at least 12 characters'),
   phone: z.string().min(5).max(20).optional(),
   phone_country_code: z.string().min(1).max(5).optional(),
   country: z.string().length(2).optional(),
