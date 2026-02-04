@@ -192,7 +192,7 @@ const updateGeneralSettingsSchema = z.object({
   state_province: z.string().max(100).optional().nullable(),
   state_code: z.string().max(10).optional().nullable(),
   postal_code: z.string().max(20).optional().nullable(),
-  country: z.string().length(2).optional().nullable(),
+  country: z.string().max(2).optional().nullable(),
   primary_color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional().nullable(),
 });
 
