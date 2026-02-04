@@ -35,7 +35,9 @@ function getCookieOptions(overrides: Partial<CookieOptions> = {}): CookieOptions
     path: '/',
     httpOnly: true,
     secure: isProduction, // HTTPS only in production
-    sameSite: isProduction ? 'Strict' : 'Lax', // Strict in production for CSRF protection
+    // Use None for cross-subdomain requests (e.g., demo.zygo.tech → api.zygo.tech)
+    // Requires Secure flag to be set
+    sameSite: isProduction ? 'None' : 'Lax',
     domain: isProduction ? '.zygo.tech' : undefined, // Allow cross-subdomain in production
     ...overrides,
   };
