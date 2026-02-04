@@ -441,7 +441,7 @@ app.patch(
 
     // Convert snake_case to camelCase for the service
     const serviceUpdates: Parameters<typeof updateTenantBillingSettings>[1] = {};
-    if (updates.billing_email !== undefined) serviceUpdates.billingEmail = updates.billing_email;
+    if (updates.billing_email !== undefined) serviceUpdates.billingEmail = updates.billing_email ?? undefined;
     if (updates.use_different_address !== undefined) serviceUpdates.useDifferentBillingAddress = updates.use_different_address;
     if (updates.billing_address !== undefined) serviceUpdates.billingAddress = updates.billing_address ?? undefined;
     if (updates.billing_address_line2 !== undefined) serviceUpdates.billingAddressLine2 = updates.billing_address_line2 ?? undefined;
