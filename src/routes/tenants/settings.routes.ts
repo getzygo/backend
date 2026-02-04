@@ -382,14 +382,14 @@ app.patch(
 
 // Update billing settings schema
 const updateBillingSettingsSchema = z.object({
-  billing_email: z.string().email().max(255).optional(),
+  billing_email: z.string().email().max(255).optional().nullable(),
   use_different_address: z.boolean().optional(),
   billing_address: z.string().max(255).optional().nullable(),
   billing_address_line2: z.string().max(255).optional().nullable(),
   billing_city: z.string().max(100).optional().nullable(),
   billing_state: z.string().max(100).optional().nullable(),
   billing_postal_code: z.string().max(20).optional().nullable(),
-  billing_country: z.string().length(2).optional().nullable(),
+  billing_country: z.string().max(2).optional().nullable(),
   billing_phone: z.string().max(30).optional().nullable(),
   billing_phone_country_code: z.string().max(5).optional().nullable(),
 });
