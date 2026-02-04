@@ -39,6 +39,13 @@ import { createAuthToken } from '../../services/auth-token.service';
 import { parseUserAgent } from '../../services/device-fingerprint.service';
 import { createSession } from '../../services/session.service';
 import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
+import { isDeviceTrusted } from '../../services/trusted-device.service';
+import { getRedis } from '../../db/redis';
+import { randomBytes } from 'crypto';
+
+// Key for storing pending MFA sessions (OAuth flow)
+const OAUTH_MFA_KEY = 'oauth_mfa:';
+const OAUTH_MFA_TTL = 300; // 5 minutes
 
 const app = new Hono();
 
@@ -229,6 +236,73 @@ app.post('/signin', async (c) => {
           updatedAt: new Date(),
         })
         .where(eq(users.id, user.id));
+
+      // SECURITY: Check if MFA is required
+      let mfaPending = false;
+      let mfaToken: string | undefined;
+
+      if (user.mfaEnabled) {
+        // Check if device is trusted (can skip MFA)
+        const isTrusted = await isDeviceTrusted({
+          userId: user.id,
+          userAgent: userAgent || undefined,
+          ipAddress: ipAddress || undefined,
+        });
+
+        console.log('[OAuth] MFA check for user:', user.id, 'mfaEnabled:', user.mfaEnabled, 'isTrusted:', isTrusted);
+
+        if (!isTrusted) {
+          // MFA required - create pending MFA session
+          mfaPending = true;
+          mfaToken = randomBytes(32).toString('hex');
+          const redis = getRedis();
+
+          // Get target tenant for redirect after MFA
+          const targetTenant = userTenants[0]?.tenant;
+
+          // Store pending MFA session
+          await redis.setex(
+            `${OAUTH_MFA_KEY}${mfaToken}`,
+            OAUTH_MFA_TTL,
+            JSON.stringify({
+              userId: user.id,
+              email: user.email,
+              provider,
+              supabaseAccessToken: supabase_access_token,
+              targetTenantSlug: targetTenant?.slug,
+              ipAddress,
+              userAgent,
+            })
+          );
+
+          // Audit log - MFA required
+          await db.insert(auditLogs).values({
+            userId: user.id,
+            action: 'login_mfa_required',
+            resourceType: 'user',
+            resourceId: user.id,
+            details: { method: 'oauth', provider },
+            ipAddress: ipAddress || undefined,
+            userAgent: userAgent || undefined,
+            status: 'pending',
+          });
+
+          // Return MFA required response
+          const targetSlug = targetTenant?.slug || 'app';
+          return c.json({
+            success: true,
+            mfa_required: true,
+            redirect_url: `https://${targetSlug}.zygo.tech/mfa-verify?mfa_token=${mfaToken}`,
+            user: {
+              id: user.id,
+              email: user.email,
+              first_name: user.firstName,
+              last_name: user.lastName,
+              mfa_enabled: user.mfaEnabled,
+            },
+          });
+        }
+      }
 
       // Create session record for session management
       // For OAuth implicit flow, generate a session token since we don't have the refresh token
@@ -1151,6 +1225,193 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       400
     );
   }
+});
+
+// Verify MFA schema (for completing OAuth login with MFA)
+const verifyOAuthMfaSchema = z.object({
+  mfa_token: z.string().min(1, 'MFA token is required'),
+  mfa_code: z.string().min(6).max(6, 'MFA code must be 6 digits'),
+  trust_device: z.boolean().optional(),
+});
+
+/**
+ * POST /api/v1/auth/oauth/verify-mfa
+ * Complete OAuth login with MFA code.
+ */
+app.post('/verify-mfa', zValidator('json', verifyOAuthMfaSchema), async (c) => {
+  const { mfa_token, mfa_code, trust_device } = c.req.valid('json');
+  const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
+  const userAgent = c.req.header('user-agent');
+
+  const redis = getRedis();
+  const db = getDb();
+
+  // Get pending MFA session
+  const sessionData = await redis.get(`${OAUTH_MFA_KEY}${mfa_token}`);
+
+  if (!sessionData) {
+    return c.json(
+      {
+        error: 'invalid_or_expired_token',
+        message: 'MFA session has expired. Please try logging in again.',
+      },
+      400
+    );
+  }
+
+  const session = JSON.parse(sessionData);
+
+  // Import MFA service dynamically to avoid circular deps
+  const mfaService = await import('../../services/mfa.service');
+
+  // Verify MFA code
+  const mfaResult = await mfaService.verifyMfaCode(session.userId, mfa_code);
+
+  if (!mfaResult.verified) {
+    // Audit log - MFA failed
+    await db.insert(auditLogs).values({
+      userId: session.userId,
+      action: 'login_mfa_failed',
+      resourceType: 'user',
+      resourceId: session.userId,
+      details: { method: 'oauth', provider: session.provider, error: mfaResult.error },
+      ipAddress: ipAddress || undefined,
+      userAgent: userAgent || undefined,
+      status: 'failure',
+    });
+
+    return c.json(
+      {
+        error: 'invalid_mfa_code',
+        message: mfaResult.error || 'Invalid MFA code. Please try again.',
+        warning: mfaResult.warning,
+        remaining_codes: mfaResult.remaining_codes,
+      },
+      401
+    );
+  }
+
+  // MFA verified - delete pending session
+  await redis.del(`${OAUTH_MFA_KEY}${mfa_token}`);
+
+  // Get user
+  const user = await db.query.users.findFirst({
+    where: eq(users.id, session.userId),
+  });
+
+  if (!user) {
+    return c.json(
+      {
+        error: 'user_not_found',
+        message: 'Account not found.',
+      },
+      404
+    );
+  }
+
+  // Trust device if requested
+  if (trust_device) {
+    const { trustDevice } = await import('../../services/trusted-device.service');
+    await trustDevice({
+      userId: user.id,
+      userAgent: userAgent || undefined,
+      ipAddress: ipAddress || undefined,
+    });
+  }
+
+  // Get user's tenant memberships
+  const userTenants = await getUserTenants(user.id);
+
+  if (userTenants.length === 0) {
+    return c.json(
+      {
+        error: 'no_workspace',
+        message: 'You are not a member of any workspace.',
+      },
+      403
+    );
+  }
+
+  const targetMembership = userTenants[0];
+
+  // Map tenant memberships for switcher UI
+  const tenantMemberships = userTenants.map((m) => ({
+    id: m.tenant.id,
+    name: m.tenant.name,
+    slug: m.tenant.slug,
+    plan: m.tenant.plan,
+    role: {
+      id: m.role.id,
+      name: m.role.name,
+    },
+    isOwner: m.isOwner,
+  }));
+
+  // Generate auth token
+  const authToken = await createAuthToken({
+    userId: user.id,
+    tenantId: targetMembership.tenant.id,
+    email: user.email,
+    firstName: user.firstName,
+    lastName: user.lastName,
+    avatarUrl: user.avatarUrl || undefined,
+    avatarSource: user.avatarSource || undefined,
+    emailVerified: user.emailVerified,
+    emailVerifiedVia: user.emailVerifiedVia,
+    roleId: targetMembership.role.id,
+    roleName: targetMembership.role.name,
+    roleSlug: targetMembership.role.slug,
+    isOwner: targetMembership.isOwner,
+    supabaseAccessToken: session.supabaseAccessToken,
+    tenantMemberships,
+  });
+
+  // Update last login
+  await db
+    .update(users)
+    .set({
+      lastLoginAt: new Date(),
+      lastLoginIp: ipAddress || null,
+    })
+    .where(eq(users.id, user.id));
+
+  // Audit log
+  await db.insert(auditLogs).values({
+    userId: user.id,
+    action: 'login',
+    resourceType: 'user',
+    resourceId: user.id,
+    details: { method: 'oauth', provider: session.provider, mfa_verified: true },
+    ipAddress: ipAddress || undefined,
+    userAgent: userAgent || undefined,
+    status: 'success',
+  });
+
+  // Build redirect URL (use fragment for security)
+  const redirectUrl = `https://${targetMembership.tenant.slug}.zygo.tech/#auth_token=${authToken}`;
+
+  return c.json({
+    success: true,
+    auth_token: authToken,
+    redirect_url: redirectUrl,
+    user: {
+      id: user.id,
+      email: user.email,
+      first_name: user.firstName,
+      last_name: user.lastName,
+      email_verified: user.emailVerified,
+      mfa_enabled: user.mfaEnabled,
+    },
+    tenant: {
+      id: targetMembership.tenant.id,
+      name: targetMembership.tenant.name,
+      slug: targetMembership.tenant.slug,
+    },
+    requires_workspace_selection: userTenants.length > 1,
+    workspaces: userTenants.length > 1 ? tenantMemberships : undefined,
+    warning: mfaResult.warning,
+    remaining_codes: mfaResult.remaining_codes,
+  });
 });
 
 export default app;
