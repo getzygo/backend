@@ -114,6 +114,22 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
     );
   }
 
+  // Calculate session expiration from JWT if available
+  let sessionExpiresAt: number | null = null;
+  if (payload.supabaseAccessToken) {
+    try {
+      // Decode JWT to get expiration (without verification - we already verified it)
+      const [, payloadPart] = payload.supabaseAccessToken.split('.');
+      const decoded = JSON.parse(Buffer.from(payloadPart, 'base64url').toString());
+      if (decoded.exp) {
+        sessionExpiresAt = decoded.exp; // Unix timestamp in seconds
+      }
+    } catch {
+      // If JWT decode fails, estimate 1 hour from now (default Supabase TTL)
+      sessionExpiresAt = Math.floor(Date.now() / 1000) + 3600;
+    }
+  }
+
   // Return verified user, tenant, role, permissions, session, and tenant memberships
   // Note: avatarUrl is not exposed - frontend fetches via /users/me/avatar/file
   return c.json({
@@ -149,6 +165,7 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
     session: payload.supabaseAccessToken ? {
       access_token: payload.supabaseAccessToken,
       refresh_token: payload.supabaseRefreshToken || null,
+      expires_at: sessionExpiresAt, // Unix timestamp for frontend to track expiration
     } : null,
     // Cached tenant memberships for tenant switcher UI (no API calls needed)
     tenantMemberships: payload.tenantMemberships || [],
@@ -218,7 +235,8 @@ app.post('/refresh', async (c) => {
  * Check if user is authenticated via HTTPOnly cookie
  *
  * This endpoint allows the frontend to check auth status without
- * exposing tokens to JavaScript. Returns user info if authenticated.
+ * exposing tokens to JavaScript. Returns user info and session expiration
+ * so the frontend can show a lock screen when session is about to expire.
  */
 app.get('/check', async (c) => {
   const { getAccessToken } = await import('../../utils/cookies');
@@ -229,6 +247,7 @@ app.get('/check', async (c) => {
   if (!token) {
     return c.json({
       authenticated: false,
+      reason: 'no_token',
     });
   }
 
@@ -236,9 +255,29 @@ app.get('/check', async (c) => {
   const sessionResult = await getSession(token);
 
   if (sessionResult.error || !sessionResult.user) {
+    // Check if it's an expiration error
+    const errorMsg = sessionResult.error?.toLowerCase() || '';
+    const isExpired = errorMsg.includes('expired') ||
+                      errorMsg.includes('jwt expired') ||
+                      errorMsg.includes('"exp" claim');
+
     return c.json({
       authenticated: false,
+      reason: isExpired ? 'session_expired' : 'invalid_token',
+      message: isExpired ? 'Your session has expired. Please sign in again.' : undefined,
     });
+  }
+
+  // Decode JWT to get expiration time
+  let sessionExpiresAt: number | null = null;
+  try {
+    const [, payloadPart] = token.split('.');
+    const decoded = JSON.parse(Buffer.from(payloadPart, 'base64url').toString());
+    if (decoded.exp) {
+      sessionExpiresAt = decoded.exp; // Unix timestamp in seconds
+    }
+  } catch {
+    // Ignore decode errors
   }
 
   return c.json({
@@ -246,6 +285,9 @@ app.get('/check', async (c) => {
     user: {
       id: sessionResult.user.id,
       email: sessionResult.user.email,
+    },
+    session: {
+      expires_at: sessionExpiresAt, // Unix timestamp for frontend to track
     },
   });
 });
