@@ -15,6 +15,7 @@ import mfaRoutes from './mfa.routes';
 import completeProfileRoutes from './complete-profile.routes';
 import passwordResetRoutes from './password-reset.routes';
 import changePasswordRoutes from './change-password.routes';
+import setPasswordRoutes from './set-password.routes';
 import verifyTokenRoutes from './verify-token.routes';
 import sessionsRoutes from './sessions.routes';
 import trustedDevicesRoutes from './trusted-devices.routes';
@@ -85,6 +86,10 @@ app.route('/', passwordResetRoutes);
 // Change password routes (authenticated)
 // POST /api/v1/auth/change-password
 app.route('/change-password', changePasswordRoutes);
+
+// Set password routes (authenticated, for users without a password)
+// POST /api/v1/auth/set-password
+app.route('/set-password', setPasswordRoutes);
 
 // Token verification routes (for cross-domain auth)
 // POST /api/v1/auth/verify-token
