@@ -74,6 +74,9 @@ app.post('/forgot-password', rateLimit(RATE_LIMITS.STRICT), zValidator('json', f
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
 
+  // Debug: log exact email received from frontend
+  console.log(`[PasswordReset] Received forgot-password request for email: "${email}" from IP: ${ipAddress}`);
+
   const db = getDb();
   const redis = getRedis();
   const env = getEnv();
