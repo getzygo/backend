@@ -3,6 +3,8 @@
  *
  * Sent when a user is invited to join a tenant/workspace.
  * Includes the inviter info, role, and accept link.
+ *
+ * Follows the same structure as magic-link.tsx for email client compatibility.
  */
 
 import {
@@ -33,11 +35,14 @@ export function TeamInvite({
   inviterName = 'Someone',
   tenantName = 'a workspace',
   roleName = 'Member',
-  message,
   acceptUrl,
   expiresInDays = 7,
   isExistingUser = false,
 }: TeamInviteProps) {
+  const expiryText = isExistingUser
+    ? 'This link expires in 24 hours. After that, you can still accept by signing in to the workspace.'
+    : `This invitation expires in ${expiresInDays} days.`;
+
   return (
     <Html>
       <Head />
@@ -57,56 +62,15 @@ export function TeamInvite({
               <strong>{roleName}</strong>.
             </Text>
 
-            {message && (
-              <Section style={messageContainerStyle}>
-                <Text style={messageLabelStyle}>Message from {inviterName}:</Text>
-                <Text style={messageTextStyle}>&ldquo;{message}&rdquo;</Text>
-              </Section>
-            )}
-
             <Section style={buttonContainerStyle}>
               <Button href={acceptUrl}>Accept Invitation</Button>
             </Section>
 
-            {isExistingUser && (
-              <Text style={helperTextStyle}>
-                Just click the button above — no sign-in needed.
-              </Text>
-            )}
-
-            <Text style={expiryStyle}>
-              {isExistingUser
-                ? 'This link expires in 24 hours. After that, you can still accept by signing in to the workspace.'
-                : `This invitation expires in ${expiresInDays} days.`}
-            </Text>
-
-            <Section style={dividerStyle} />
-
-            <Text style={subheadingStyle}>What is Zygo?</Text>
+            <Text style={expiryStyle}>{expiryText}</Text>
 
             <Text style={paragraphStyle}>
-              Zygo is an AI-powered workflow automation platform that helps teams
-              build and deploy intelligent workflows. With Zygo, you can:
-            </Text>
-
-            <Section style={listContainerStyle}>
-              <Text style={listItemStyle}>
-                <strong>Create AI agents</strong> - Build workflows that think and adapt
-              </Text>
-              <Text style={listItemStyle}>
-                <strong>Automate processes</strong> - Connect your tools and data sources
-              </Text>
-              <Text style={listItemStyle}>
-                <strong>Collaborate with your team</strong> - Work together on shared workflows
-              </Text>
-            </Section>
-
-            <Text style={paragraphStyle}>
-              If you didn&apos;t expect this invitation or have questions, please contact{' '}
-              <Link href={`mailto:${inviterName.toLowerCase().replace(/\s/g, '.')}@your-company.com`} style={linkStyle}>
-                {inviterName}
-              </Link>{' '}
-              or{' '}
+              If you didn&apos;t expect this invitation, you can safely ignore this
+              email or contact{' '}
               <Link href="mailto:support@getzygo.com" style={linkStyle}>
                 our support team
               </Link>
@@ -114,11 +78,13 @@ export function TeamInvite({
             </Text>
 
             <Text style={signatureStyle}>
+              Best,
+              <br />
               The Zygo Team
             </Text>
           </Section>
 
-          <Footer includeUnsubscribe={false} />
+          <Footer />
         </Container>
       </Body>
     </Html>
@@ -147,18 +113,11 @@ const contentStyle: React.CSSProperties = {
 };
 
 const headingStyle: React.CSSProperties = {
-  fontSize: '28px',
+  fontSize: '24px',
   fontWeight: 600,
   color: '#111827',
   margin: '0 0 24px 0',
   textAlign: 'center' as const,
-};
-
-const subheadingStyle: React.CSSProperties = {
-  fontSize: '18px',
-  fontWeight: 600,
-  color: '#111827',
-  margin: '24px 0 16px 0',
 };
 
 const paragraphStyle: React.CSSProperties = {
@@ -168,38 +127,9 @@ const paragraphStyle: React.CSSProperties = {
   margin: '0 0 16px 0',
 };
 
-const messageContainerStyle: React.CSSProperties = {
-  backgroundColor: '#f3f4f6',
-  borderRadius: '8px',
-  padding: '16px',
-  margin: '24px 0',
-};
-
-const messageLabelStyle: React.CSSProperties = {
-  fontSize: '13px',
-  fontWeight: 500,
-  color: '#6b7280',
-  margin: '0 0 8px 0',
-};
-
-const messageTextStyle: React.CSSProperties = {
-  fontSize: '15px',
-  lineHeight: '1.6',
-  color: '#374151',
-  fontStyle: 'italic',
-  margin: 0,
-};
-
 const buttonContainerStyle: React.CSSProperties = {
   textAlign: 'center' as const,
-  margin: '32px 0',
-};
-
-const helperTextStyle: React.CSSProperties = {
-  fontSize: '13px',
-  color: '#6b7280',
-  textAlign: 'center' as const,
-  margin: '-16px 0 8px 0',
+  margin: '24px 0',
 };
 
 const expiryStyle: React.CSSProperties = {
@@ -207,24 +137,6 @@ const expiryStyle: React.CSSProperties = {
   color: '#6b7280',
   textAlign: 'center' as const,
   margin: '0 0 24px 0',
-};
-
-const dividerStyle: React.CSSProperties = {
-  borderTop: '1px solid #e5e7eb',
-  margin: '24px 0',
-};
-
-const listContainerStyle: React.CSSProperties = {
-  margin: '0 0 24px 0',
-};
-
-const listItemStyle: React.CSSProperties = {
-  fontSize: '15px',
-  lineHeight: '1.6',
-  color: '#374151',
-  margin: '0 0 12px 0',
-  paddingLeft: '20px',
-  position: 'relative' as const,
 };
 
 const linkStyle: React.CSSProperties = {
