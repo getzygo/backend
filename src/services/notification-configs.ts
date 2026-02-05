@@ -18,6 +18,7 @@ import {
   TenantDeletionRequested,
   TenantDeletionCancelled,
 } from '../emails/templates';
+import { TeamInvite } from '../emails/templates/team-invite';
 import type { NotificationType, NotificationSeverity, NotificationCategory } from './notification.service';
 
 interface NotificationConfig {
@@ -213,6 +214,40 @@ export const NOTIFICATION_CONFIGS: Record<string, NotificationConfig> = {
     actionLabel: 'Go to Dashboard',
     emailSubject: 'Workspace deletion cancelled - Zygo',
   },
+
+  team_invitation_received: {
+    type: 'team',
+    category: 'team_invitation',
+    title: 'Workspace Invitation',
+    message: (details) => {
+      const inviter = details?.inviterName as string | undefined;
+      const tenant = details?.tenantName as string | undefined;
+      return inviter && tenant
+        ? `${inviter} invited you to join ${tenant}.`
+        : 'You have been invited to join a workspace.';
+    },
+    severity: 'success',
+    actionRoute: '/invites',
+    actionLabel: 'View Invitation',
+    emailSubject: "You've been invited to join a workspace - Zygo",
+  },
+
+  member_joined: {
+    type: 'team',
+    category: 'member_joined',
+    title: 'New Team Member',
+    message: (details) => {
+      const memberName = details?.memberName as string | undefined;
+      const tenantName = details?.tenantName as string | undefined;
+      return memberName
+        ? `${memberName} has joined ${tenantName || 'the workspace'}.`
+        : 'A new member has joined the workspace.';
+    },
+    severity: 'success',
+    actionRoute: '/settings/users',
+    actionLabel: 'View Members',
+    emailSubject: 'A new member has joined your workspace - Zygo',
+  },
 };
 
 /**
@@ -391,4 +426,15 @@ export const EMAIL_TEMPLATES = {
       cancelledAt: new Date(),
       appUrl: props.appUrl,
     }),
+
+  teamInvite: (props: {
+    inviteeName?: string;
+    inviterName?: string;
+    tenantName?: string;
+    roleName?: string;
+    message?: string;
+    acceptUrl: string;
+    expiresInDays?: number;
+  }) =>
+    TeamInvite(props),
 };

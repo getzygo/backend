@@ -106,6 +106,7 @@ export async function sendEmail({ to, subject, template, headers = {} }: SendEma
 
     await transporter.sendMail({
       from: `"Zygo" <${env.EMAIL_FROM}>`,
+      replyTo: '"Zygo Support" <support@getzygo.com>',
       to,
       subject,
       html,

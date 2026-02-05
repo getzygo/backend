@@ -25,6 +25,8 @@ import {
 } from '../db/schema';
 import { canAddMember } from './member.service';
 import { sendTeamInviteEmail } from './email.service';
+import { notify } from './notification-hub.service';
+import { getNotificationConfig } from './notification-configs';
 
 // Invite expiration: 7 days
 const INVITE_EXPIRATION_DAYS = 7;
@@ -192,6 +194,31 @@ export async function createInvite(params: {
     tenantSlug: tenant?.slug || 'app',
     expiresInDays: INVITE_EXPIRATION_DAYS,
   });
+
+  // Send in-app notification to invited user (if they have an account)
+  if (existingUser) {
+    const config = getNotificationConfig('team_invitation_received', {
+      inviterName,
+      tenantName: tenant?.name,
+    });
+    notify({
+      userId: existingUser.id,
+      tenantId,
+      category: config.category,
+      type: config.type,
+      title: config.title,
+      message: config.message,
+      severity: config.severity,
+      actionRoute: config.actionRoute,
+      actionLabel: config.actionLabel,
+      metadata: {
+        inviteId: invite.id,
+        inviterName,
+        tenantName: tenant?.name,
+        roleName: role.name,
+      },
+    }).catch((err) => console.error('[Invite] Notification failed:', err));
+  }
 
   return {
     success: true,
@@ -558,6 +585,28 @@ export async function acceptInvite(params: {
       updatedAt: new Date(),
     })
     .where(eq(tenantInvites.id, invite.id));
+
+  // Notify the inviter that their invitation was accepted
+  const config = getNotificationConfig('member_joined', {
+    memberName: user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email,
+    tenantName: invite.tenant.name,
+  });
+  notify({
+    userId: invite.invitedBy,
+    tenantId: invite.tenantId,
+    category: config.category,
+    type: config.type,
+    title: config.title,
+    message: config.message,
+    severity: config.severity,
+    actionRoute: config.actionRoute,
+    actionLabel: config.actionLabel,
+    metadata: {
+      acceptedBy: userId,
+      memberName: user.firstName || user.email,
+      tenantName: invite.tenant.name,
+    },
+  }).catch((err) => console.error('[Invite] Accept notification failed:', err));
 
   return {
     success: true,

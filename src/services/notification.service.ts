@@ -30,6 +30,7 @@ export type NotificationCategory =
   | 'workflow_created'
   | 'workflow_published'
   | 'team_invitation'
+  | 'member_joined'
   | 'integration_failure'
   // Reminder categories
   | 'mfa_enablement_first'
@@ -59,6 +60,7 @@ export const ALERT_POLICIES = {
   workflow_created: 'ALLOW_DISABLE',
   workflow_published: 'ALLOW_DISABLE',
   team_invitation: 'ALLOW_DISABLE',
+  member_joined: 'ALLOW_DISABLE',
   integration_failure: 'ALLOW_DISABLE',
   // Reminder policies - MFA and phone are critical security reminders
   mfa_enablement_first: 'ALWAYS_SEND',
