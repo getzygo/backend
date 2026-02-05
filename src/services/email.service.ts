@@ -90,6 +90,12 @@ export async function sendEmail({ to, subject, template, headers = {} }: SendEma
     let html = await render(template);
     const text = await render(template, { plainText: true });
 
+    // Strip React 18 streaming comment markers (<!--$--> and <!--/$-->).
+    // @react-email/render v2 uses renderToReadableStream which injects these
+    // between DOCTYPE and <html>. SendGrid's HTML parser chokes on them,
+    // stripping the actual body content and leaving only the preview div.
+    html = html.replace(/<!--\/?\$-->/g, '');
+
     // Fix React Email preview placement for SendGrid compatibility.
     // React Email renders <Preview> as a <div> between </head> and <body>,
     // which is invalid HTML. SendGrid's parser treats it as an implicit body
@@ -101,12 +107,6 @@ export async function sendEmail({ to, subject, template, headers = {} }: SendEma
     );
 
     console.log(`[Email] Rendered "${subject}": html=${html.length} chars, text=${text.length} chars`);
-    // Debug: dump full HTML to file for inspection
-    try {
-      const fs = await import('fs');
-      fs.writeFileSync('/tmp/last-email-debug.html', html, 'utf8');
-      console.log(`[Email] Full HTML dumped to /tmp/last-email-debug.html`);
-    } catch {}
     if (html.length < 100) {
       console.warn(`[Email] WARNING: HTML body is suspiciously short (${html.length} chars):`, html);
     }
