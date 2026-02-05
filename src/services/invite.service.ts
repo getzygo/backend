@@ -172,6 +172,8 @@ export async function createInvite(params: {
     .values({
       tenantId,
       email: normalizedEmail,
+      firstName: firstName || null,
+      lastName: lastName || null,
       userId: existingUser?.id,
       roleId,
       token,

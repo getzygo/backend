@@ -277,7 +277,8 @@ app.post('/:token/signup-accept', rateLimit(RATE_LIMITS.AUTH), zValidator('json'
     .values({
       id: supabaseUserId,
       email: invite.email,
-      emailVerified: false,
+      emailVerified: true,
+      emailVerifiedVia: 'invite',
       passwordHash,
       firstName: body.first_name,
       lastName: body.last_name,
@@ -347,8 +348,8 @@ app.post('/:token/signup-accept', rateLimit(RATE_LIMITS.AUTH), zValidator('json'
     lastName: newUser.lastName,
     avatarUrl: undefined,
     avatarSource: undefined,
-    emailVerified: false,
-    emailVerifiedVia: undefined,
+    emailVerified: true,
+    emailVerifiedVia: 'invite',
     authMethod: 'password',
     oauthProvider: null,
     hasPassword: true,
@@ -461,6 +462,8 @@ app.get('/:token', async (c) => {
     invite: {
       id: invite.id,
       email: invite.email,
+      first_name: invite.firstName || null,
+      last_name: invite.lastName || null,
       tenant: {
         name: invite.tenant.name,
         slug: invite.tenant.slug,

@@ -331,6 +331,8 @@ export const tenantInvites = pgTable(
 
     // Invitee information
     email: varchar('email', { length: 255 }).notNull(),
+    firstName: varchar('first_name', { length: 100 }),
+    lastName: varchar('last_name', { length: 100 }),
     // If user already exists in system
     userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
 
