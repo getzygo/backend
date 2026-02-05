@@ -252,6 +252,7 @@ app.get('/:tenantId/members/invites', async (c) => {
     invites: invites.map((i) => ({
       id: i.id,
       email: i.email,
+      token: i.token,
       role: {
         id: i.role.id,
         name: i.role.name,
