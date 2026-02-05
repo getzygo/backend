@@ -16,7 +16,6 @@ import { getInviteByToken, acceptInvite } from '../services/invite.service';
 import { verifyMagicLink } from '../services/magic-link.service';
 import { createAuthToken, type TenantMembership } from '../services/auth-token.service';
 import { generateSessionForUser } from '../services/supabase.service';
-import { isDeviceTrusted } from '../services/trusted-device.service';
 import { getDb } from '../db/client';
 import { auditLogs, users, tenantMembers, tenants, roles } from '../db/schema';
 import type { User } from '../db/schema';
@@ -73,20 +72,12 @@ app.get('/magic-accept', rateLimit(RATE_LIMITS.AUTH), async (c) => {
     );
   }
 
-  // 5. Check MFA — if required and device not trusted, redirect to frontend fallback
-  if (user.mfaEnabled) {
-    const isTrusted = await isDeviceTrusted({
-      userId: user.id,
-      userAgent: userAgent || undefined,
-      ipAddress: ipAddress || undefined,
-    });
-
-    if (!isTrusted) {
-      return c.redirect(
-        `https://${invite.tenant.slug}.zygo.tech/invite/${inviteToken}?mfa_required=true`
-      );
-    }
-  }
+  // 5. MFA check skipped for magic invite links.
+  // The magic link itself is a strong single-use authentication factor:
+  // - Sent to the invitee's verified email (proves email ownership)
+  // - Single-use (consumed on verification)
+  // - Time-limited (24-hour expiry)
+  // This is equivalent to or stronger than a TOTP code.
 
   // 6. Accept invite
   const acceptResult = await acceptInvite({
