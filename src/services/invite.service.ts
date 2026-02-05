@@ -24,7 +24,7 @@ import {
   type User,
 } from '../db/schema';
 import { canAddMember } from './member.service';
-import { sendTeamInviteEmail } from './email.service';
+import { sendTeamInviteEmail, sendInviteAcceptedEmail } from './email.service';
 import { createMagicLinkForInvite } from './magic-link.service';
 import { notify } from './notification-hub.service';
 import { getNotificationConfig } from './notification-configs';
@@ -614,9 +614,10 @@ export async function acceptInvite(params: {
     })
     .where(eq(tenantInvites.id, invite.id));
 
-  // Notify the inviter that their invitation was accepted
+  // Notify the inviter that their invitation was accepted (in-app)
+  const memberName = user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email;
   const config = getNotificationConfig('member_joined', {
-    memberName: user.firstName ? `${user.firstName} ${user.lastName || ''}`.trim() : user.email,
+    memberName,
     tenantName: invite.tenant.name,
   });
   notify({
@@ -635,6 +636,22 @@ export async function acceptInvite(params: {
       tenantName: invite.tenant.name,
     },
   }).catch((err) => console.error('[Invite] Accept notification failed:', err));
+
+  // Send confirmation email to the inviter
+  const inviter = await db.query.users.findFirst({
+    where: eq(users.id, invite.invitedBy),
+    columns: { email: true, firstName: true },
+  });
+  if (inviter) {
+    sendInviteAcceptedEmail(inviter.email, {
+      inviterFirstName: inviter.firstName || undefined,
+      memberName,
+      memberEmail: user.email,
+      tenantName: invite.tenant.name,
+      tenantSlug: invite.tenant.slug,
+      roleName: invite.role.name,
+    }).catch((err) => console.error('[Invite] Accepted email to inviter failed:', err));
+  }
 
   return {
     success: true,

@@ -3,6 +3,9 @@
  *
  * Sent when a user enables two-factor authentication.
  * ALLOW_DISABLE policy - user can disable these alerts.
+ *
+ * Uses only standard @react-email/components (no custom components)
+ * for reliable rendering across all email clients.
  */
 
 import {
@@ -14,8 +17,12 @@ import {
   Section,
   Text,
   Link,
+  Img,
+  Hr,
+  Row,
+  Column,
+  Button,
 } from '@react-email/components';
-import { Header, Footer, Button, AlertBox } from '../components';
 
 interface MfaEnabledProps {
   firstName?: string;
@@ -46,177 +53,165 @@ export function MfaEnabled({
     sms: 'SMS',
   };
 
+  const year = new Date().getFullYear();
+
   return (
     <Html>
       <Head />
       <Preview>Two-factor authentication has been enabled on your Zygo account</Preview>
-      <Body style={bodyStyle}>
-        <Container style={containerStyle}>
-          <Header />
+      <Body style={{ backgroundColor: '#f9fafb', fontFamily: '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif', margin: 0, padding: 0 }}>
+        <Container style={{ backgroundColor: '#ffffff', maxWidth: '600px', margin: '40px auto', padding: '0 24px 24px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
 
-          <Section style={contentStyle}>
-            <Text style={headingStyle}>Two-factor authentication enabled</Text>
+          {/* Header with logo */}
+          <Section style={{ padding: '24px 0', borderBottom: '1px solid #e5e7eb', marginBottom: '32px' }}>
+            <Row>
+              <Column align="center">
+                <Img
+                  src="https://demo.zygo.tech/logo.png"
+                  alt="Zygo"
+                  width="48"
+                  height="48"
+                  style={{ display: 'block', margin: '0 auto' }}
+                />
+              </Column>
+            </Row>
+          </Section>
 
-            <Text style={paragraphStyle}>Hi {firstName},</Text>
+          {/* Content */}
+          <Section style={{ padding: '0 24px' }}>
+            <Text style={{ fontSize: '24px', fontWeight: 600, color: '#111827', margin: '0 0 24px 0', textAlign: 'center' as const }}>
+              Two-factor authentication enabled
+            </Text>
 
-            <Text style={paragraphStyle}>
+            <Text style={{ fontSize: '15px', lineHeight: '1.6', color: '#374151', margin: '0 0 16px 0' }}>
+              Hi {firstName},
+            </Text>
+
+            <Text style={{ fontSize: '15px', lineHeight: '1.6', color: '#374151', margin: '0 0 16px 0' }}>
               Great news! Two-factor authentication (2FA) has been successfully
               enabled on your Zygo account using {methodLabels[method]}.
             </Text>
 
-            <AlertBox variant="success" title="Your account is now more secure">
-              Two-factor authentication adds an extra layer of security to your
-              account. You&apos;ll need to provide a verification code in addition to
-              your password when signing in.
-            </AlertBox>
-
-            <Section style={detailsContainerStyle}>
-              <Text style={detailsLabelStyle}>Method</Text>
-              <Text style={detailsValueStyle}>{methodLabels[method]}</Text>
-
-              <Text style={detailsLabelStyle}>Enabled On</Text>
-              <Text style={detailsValueStyle}>{formattedDate}</Text>
+            {/* Success alert box */}
+            <Section style={{ padding: '16px 20px', borderLeft: '4px solid #22c55e', borderRadius: '4px', margin: '24px 0', backgroundColor: '#f0fdf4' }}>
+              <Text style={{ fontSize: '14px', fontWeight: 600, margin: '0 0 8px 0', color: '#166534' }}>
+                Your account is now more secure
+              </Text>
+              <Text style={{ fontSize: '14px', margin: '0', lineHeight: '1.5', color: '#166534' }}>
+                Two-factor authentication adds an extra layer of security to your
+                account. You'll need to provide a verification code in addition to
+                your password when signing in.
+              </Text>
             </Section>
 
-            <Text style={subheadingStyle}>Important reminders</Text>
+            {/* Details box */}
+            <Section style={{ backgroundColor: '#f9fafb', borderRadius: '8px', padding: '16px 20px', margin: '24px 0' }}>
+              <Text style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase' as const, margin: '0 0 4px 0' }}>
+                Method
+              </Text>
+              <Text style={{ fontSize: '14px', color: '#111827', margin: '0 0 12px 0' }}>
+                {methodLabels[method]}
+              </Text>
 
-            <Section style={listContainerStyle}>
-              <Text style={listItemStyle}>
+              <Text style={{ fontSize: '12px', fontWeight: 600, color: '#6b7280', textTransform: 'uppercase' as const, margin: '0 0 4px 0' }}>
+                Enabled On
+              </Text>
+              <Text style={{ fontSize: '14px', color: '#111827', margin: '0' }}>
+                {formattedDate}
+              </Text>
+            </Section>
+
+            <Text style={{ fontSize: '16px', fontWeight: 600, color: '#111827', margin: '24px 0 12px 0' }}>
+              Important reminders
+            </Text>
+
+            <Section style={{ margin: '0 0 24px 0' }}>
+              <Text style={{ fontSize: '14px', lineHeight: '1.6', color: '#374151', margin: '0 0 12px 0' }}>
                 <strong>Save your backup codes</strong> - If you lose access to
                 your authentication method, backup codes will help you regain
                 access to your account.
               </Text>
-              <Text style={listItemStyle}>
-                <strong>Keep your authenticator app safe</strong> - Don&apos;t
+              <Text style={{ fontSize: '14px', lineHeight: '1.6', color: '#374151', margin: '0 0 12px 0' }}>
+                <strong>Keep your authenticator app safe</strong> - Don't
                 uninstall or reset your authenticator app without first
                 disabling 2FA or saving your backup codes.
               </Text>
             </Section>
 
-            <Section style={buttonContainerStyle}>
-              <Button href={`${appUrl}/settings/security`}>
+            {/* CTA Button */}
+            <Section style={{ textAlign: 'center' as const, margin: '24px 0' }}>
+              <Button
+                href={`${appUrl}/settings/security`}
+                style={{
+                  display: 'inline-block',
+                  padding: '12px 24px',
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                  textAlign: 'center' as const,
+                  borderRadius: '6px',
+                  lineHeight: '1.5',
+                  backgroundColor: '#4f46e5',
+                  color: '#ffffff',
+                }}
+              >
                 View Security Settings
               </Button>
             </Section>
 
-            <Text style={helpTextStyle}>
+            <Text style={{ fontSize: '14px', color: '#6b7280', textAlign: 'center' as const, margin: '0 0 24px 0' }}>
               Need help?{' '}
-              <Link href="mailto:support@getzygo.com" style={linkStyle}>
+              <Link href="mailto:support@getzygo.com" style={{ color: '#4f46e5', textDecoration: 'none' }}>
                 Contact support
               </Link>
             </Text>
 
-            <Text style={signatureStyle}>
+            <Text style={{ fontSize: '15px', lineHeight: '1.6', color: '#374151', margin: '24px 0 0 0' }}>
               Stay secure,
               <br />
               The Zygo Security Team
             </Text>
           </Section>
 
-          <Footer includeUnsubscribe={true} unsubscribeUrl={`${appUrl}/settings/notifications`} />
+          {/* Footer */}
+          <Section style={{ marginTop: '32px', textAlign: 'center' as const }}>
+            <Hr style={{ borderColor: '#e5e7eb', margin: '24px 0' }} />
+
+            <Text style={{ fontSize: '13px', color: '#6b7280', margin: '0 0 16px 0' }}>
+              <Link href="https://getzygo.com/privacy" style={{ color: '#4f46e5', textDecoration: 'none' }}>
+                Privacy Policy
+              </Link>
+              {' • '}
+              <Link href="https://getzygo.com/terms" style={{ color: '#4f46e5', textDecoration: 'none' }}>
+                Terms of Service
+              </Link>
+              {' • '}
+              <Link href="mailto:support@getzygo.com" style={{ color: '#4f46e5', textDecoration: 'none' }}>
+                Contact Support
+              </Link>
+            </Text>
+
+            <Text style={{ fontSize: '12px', color: '#9ca3af', margin: '0 0 16px 0' }}>
+              <Link href={`${appUrl}/settings/notifications`} style={{ color: '#4f46e5', textDecoration: 'none' }}>
+                Unsubscribe from these emails
+              </Link>
+            </Text>
+
+            <Text style={{ fontSize: '12px', color: '#9ca3af', lineHeight: '1.5', margin: '0 0 8px 0' }}>
+              ZYGO AI Technologies
+              <br />
+              Budapest, Hungary
+            </Text>
+
+            <Text style={{ fontSize: '12px', color: '#9ca3af', margin: '0' }}>
+              © {year} Zygo. All rights reserved.
+            </Text>
+          </Section>
+
         </Container>
       </Body>
     </Html>
   );
 }
-
-const bodyStyle: React.CSSProperties = {
-  backgroundColor: '#f9fafb',
-  fontFamily:
-    '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
-  margin: 0,
-  padding: 0,
-};
-
-const containerStyle: React.CSSProperties = {
-  backgroundColor: '#ffffff',
-  maxWidth: '600px',
-  margin: '40px auto',
-  padding: '0 24px 24px',
-  borderRadius: '8px',
-  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
-};
-
-const contentStyle: React.CSSProperties = {
-  padding: '0 24px',
-};
-
-const headingStyle: React.CSSProperties = {
-  fontSize: '24px',
-  fontWeight: 600,
-  color: '#111827',
-  margin: '0 0 24px 0',
-  textAlign: 'center' as const,
-};
-
-const subheadingStyle: React.CSSProperties = {
-  fontSize: '16px',
-  fontWeight: 600,
-  color: '#111827',
-  margin: '24px 0 12px 0',
-};
-
-const paragraphStyle: React.CSSProperties = {
-  fontSize: '15px',
-  lineHeight: '1.6',
-  color: '#374151',
-  margin: '0 0 16px 0',
-};
-
-const detailsContainerStyle: React.CSSProperties = {
-  backgroundColor: '#f9fafb',
-  borderRadius: '8px',
-  padding: '16px 20px',
-  margin: '24px 0',
-};
-
-const detailsLabelStyle: React.CSSProperties = {
-  fontSize: '12px',
-  fontWeight: 600,
-  color: '#6b7280',
-  textTransform: 'uppercase' as const,
-  margin: '0 0 4px 0',
-};
-
-const detailsValueStyle: React.CSSProperties = {
-  fontSize: '14px',
-  color: '#111827',
-  margin: '0 0 12px 0',
-};
-
-const listContainerStyle: React.CSSProperties = {
-  margin: '0 0 24px 0',
-};
-
-const listItemStyle: React.CSSProperties = {
-  fontSize: '14px',
-  lineHeight: '1.6',
-  color: '#374151',
-  margin: '0 0 12px 0',
-};
-
-const buttonContainerStyle: React.CSSProperties = {
-  textAlign: 'center' as const,
-  margin: '24px 0',
-};
-
-const helpTextStyle: React.CSSProperties = {
-  fontSize: '14px',
-  color: '#6b7280',
-  textAlign: 'center' as const,
-  margin: '0 0 24px 0',
-};
-
-const linkStyle: React.CSSProperties = {
-  color: '#4f46e5',
-  textDecoration: 'none',
-};
-
-const signatureStyle: React.CSSProperties = {
-  fontSize: '15px',
-  lineHeight: '1.6',
-  color: '#374151',
-  margin: '24px 0 0 0',
-};
 
 export default MfaEnabled;

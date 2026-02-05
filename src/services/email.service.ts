@@ -362,6 +362,7 @@ export async function sendLoginAlertEmail(
 
 /**
  * Send MFA enabled notification
+ * Uses raw HTML (not React Email) for reliable rendering.
  */
 export async function sendMfaEnabledEmail(
   email: string,
@@ -376,15 +377,220 @@ export async function sendMfaEnabledEmail(
     return { sent: true };
   }
 
+  const name = escapeHtml(firstName || 'there');
+  const methodLabels: Record<string, string> = {
+    totp: 'Authenticator App',
+    webauthn: 'Security Key',
+    sms: 'SMS',
+  };
+  const methodLabel = methodLabels[method || 'totp'] || 'Authenticator App';
+  const formattedDate = new Date().toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
+  const year = new Date().getFullYear();
+
+  const rawHtml = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <title>Two-factor authentication enabled</title>
+  <!--[if mso]>
+  <style type="text/css">
+    table { border-collapse: collapse; }
+    .button-link { padding: 12px 24px !important; }
+  </style>
+  <![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif">
+  <div style="display:none;max-height:0;overflow:hidden">Two-factor authentication has been enabled on your Zygo account</div>
+
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6">
+    <tr>
+      <td align="center" style="padding:40px 20px">
+
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;max-width:600px;width:100%">
+
+          <!-- Logo header -->
+          <tr>
+            <td align="center" style="padding:32px 40px 24px;border-bottom:1px solid #e5e7eb">
+              <img src="https://demo.zygo.tech/logo.png" alt="Zygo" width="48" height="48" style="display:block;border:0" />
+            </td>
+          </tr>
+
+          <!-- Heading -->
+          <tr>
+            <td align="center" style="padding:32px 40px 8px">
+              <h1 style="margin:0;font-size:24px;font-weight:600;color:#111827">Two-factor authentication enabled</h1>
+            </td>
+          </tr>
+
+          <!-- Greeting -->
+          <tr>
+            <td style="padding:16px 40px 0;font-size:15px;line-height:1.6;color:#374151">
+              Hi ${name},
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding:8px 40px 24px;font-size:15px;line-height:1.6;color:#374151">
+              Great news! Two-factor authentication (2FA) has been successfully enabled on your Zygo account using <strong>${methodLabel}</strong>.
+            </td>
+          </tr>
+
+          <!-- Success alert -->
+          <tr>
+            <td style="padding:0 40px 24px">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="background-color:#f0fdf4;border-left:4px solid #22c55e;border-radius:4px;padding:16px 20px">
+                    <p style="margin:0 0 8px;font-size:14px;font-weight:600;color:#166534">Your account is now more secure</p>
+                    <p style="margin:0;font-size:14px;line-height:1.5;color:#166534">Two-factor authentication adds an extra layer of security to your account. You&#39;ll need to provide a verification code in addition to your password when signing in.</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Details box -->
+          <tr>
+            <td style="padding:0 40px 24px">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="background-color:#f9fafb;border-radius:8px;padding:16px 20px">
+                    <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase">Method</p>
+                    <p style="margin:0 0 12px;font-size:14px;color:#111827">${methodLabel}</p>
+                    <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase">Enabled On</p>
+                    <p style="margin:0;font-size:14px;color:#111827">${formattedDate}</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Important reminders -->
+          <tr>
+            <td style="padding:0 40px 8px;font-size:16px;font-weight:600;color:#111827">
+              Important reminders
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 40px 24px;font-size:14px;line-height:1.6;color:#374151">
+              <p style="margin:0 0 12px"><strong>Save your backup codes</strong> &ndash; If you lose access to your authentication method, backup codes will help you regain access to your account.</p>
+              <p style="margin:0"><strong>Keep your authenticator app safe</strong> &ndash; Don&#39;t uninstall or reset your authenticator app without first disabling 2FA or saving your backup codes.</p>
+            </td>
+          </tr>
+
+          <!-- CTA Button -->
+          <tr>
+            <td align="center" style="padding:8px 40px 24px">
+              <!--[if mso]>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${baseUrl}/settings/security" style="height:44px;v-text-anchor:middle;width:220px" arcsize="14%" fillcolor="#4f46e5" strokecolor="#4f46e5" strokeweight="0">
+                <w:anchorlock/>
+                <center style="color:#ffffff;font-family:sans-serif;font-size:14px;font-weight:600">View Security Settings</center>
+              </v:roundrect>
+              <![endif]-->
+              <!--[if !mso]><!-->
+              <a href="${baseUrl}/settings/security" target="_blank" style="display:inline-block;background-color:#4f46e5;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 32px;border-radius:6px;line-height:1.5">View Security Settings</a>
+              <!--<![endif]-->
+            </td>
+          </tr>
+
+          <!-- Help text -->
+          <tr>
+            <td align="center" style="padding:0 40px 24px;font-size:14px;color:#6b7280">
+              Need help? <a href="mailto:support@getzygo.com" style="color:#4f46e5;text-decoration:none">Contact support</a>
+            </td>
+          </tr>
+
+          <!-- Signature -->
+          <tr>
+            <td style="padding:0 40px 32px;font-size:15px;line-height:1.6;color:#374151">
+              Stay secure,<br />The Zygo Security Team
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:0 40px">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="border-top:1px solid #e5e7eb;padding-top:24px"></td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 16px;font-size:13px;color:#6b7280">
+              <a href="https://getzygo.com/privacy" style="color:#4f46e5;text-decoration:none">Privacy Policy</a>
+              &nbsp;&bull;&nbsp;
+              <a href="https://getzygo.com/terms" style="color:#4f46e5;text-decoration:none">Terms of Service</a>
+              &nbsp;&bull;&nbsp;
+              <a href="mailto:support@getzygo.com" style="color:#4f46e5;text-decoration:none">Contact Support</a>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 16px;font-size:12px;color:#9ca3af">
+              <a href="${baseUrl}/settings/notifications" style="color:#4f46e5;text-decoration:none">Unsubscribe from these emails</a>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 8px;font-size:12px;line-height:1.5;color:#9ca3af">
+              ZYGO AI Technologies<br />Budapest, Hungary
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 32px;font-size:12px;color:#9ca3af">
+              &copy; ${year} Zygo. All rights reserved.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const rawText = `Two-factor authentication enabled
+
+Hi ${firstName || 'there'},
+
+Great news! Two-factor authentication (2FA) has been successfully enabled on your Zygo account using ${methodLabel}.
+
+Your account is now more secure. You'll need to provide a verification code in addition to your password when signing in.
+
+Method: ${methodLabel}
+Enabled On: ${formattedDate}
+
+Important reminders:
+- Save your backup codes - If you lose access to your authentication method, backup codes will help you regain access.
+- Keep your authenticator app safe - Don't uninstall or reset your authenticator app without first disabling 2FA or saving your backup codes.
+
+View Security Settings: ${baseUrl}/settings/security
+
+Stay secure,
+The Zygo Security Team
+
+---
+Privacy Policy: https://getzygo.com/privacy
+Terms of Service: https://getzygo.com/terms
+Support: support@getzygo.com
+
+ZYGO AI Technologies, Budapest, Hungary
+© ${year} Zygo. All rights reserved.`;
+
   return sendEmail({
     to: email,
     subject: 'Two-factor authentication enabled - Zygo',
-    template: MfaEnabled({
-      firstName: firstName || 'there',
-      method: method || 'totp',
-      enabledAt: new Date(),
-      appUrl: baseUrl,
-    }),
+    rawHtml,
+    rawText,
     headers: {
       'List-Unsubscribe': `<${baseUrl}/settings/notifications>`,
     },
@@ -1045,6 +1251,371 @@ ZYGO AI Technologies, Budapest, Hungary
   });
 }
 
+/**
+ * Send welcome email to new user after invite signup
+ * Uses raw HTML for reliable rendering.
+ */
+export async function sendInviteWelcomeEmail(
+  email: string,
+  options: {
+    firstName?: string;
+    tenantName?: string;
+    tenantSlug?: string;
+    roleName?: string;
+  }
+): Promise<SendEmailResult> {
+  const name = escapeHtml(options.firstName || 'there');
+  const tenantName = escapeHtml(options.tenantName || 'the workspace');
+  const roleName = escapeHtml(options.roleName || 'Member');
+  const tenantSlug = options.tenantSlug || 'app';
+  const dashboardUrl = `https://${tenantSlug}.zygo.tech`;
+  const year = new Date().getFullYear();
+
+  if (!isSmtpConfigured()) {
+    logger.dev(` Invite welcome email would be sent to ${email}`);
+    return { sent: true };
+  }
+
+  const rawHtml = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <title>Welcome to ${tenantName}</title>
+  <!--[if mso]>
+  <style type="text/css">
+    table { border-collapse: collapse; }
+    .button-link { padding: 12px 24px !important; }
+  </style>
+  <![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif">
+  <div style="display:none;max-height:0;overflow:hidden">Welcome to ${tenantName} on Zygo</div>
+
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6">
+    <tr>
+      <td align="center" style="padding:40px 20px">
+
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;max-width:600px;width:100%">
+
+          <!-- Logo header -->
+          <tr>
+            <td align="center" style="padding:32px 40px 24px;border-bottom:1px solid #e5e7eb">
+              <img src="https://demo.zygo.tech/logo.png" alt="Zygo" width="48" height="48" style="display:block;border:0" />
+            </td>
+          </tr>
+
+          <!-- Heading -->
+          <tr>
+            <td align="center" style="padding:32px 40px 8px">
+              <h1 style="margin:0;font-size:24px;font-weight:600;color:#111827">Welcome to ${tenantName}!</h1>
+            </td>
+          </tr>
+
+          <!-- Greeting -->
+          <tr>
+            <td style="padding:16px 40px 0;font-size:15px;line-height:1.6;color:#374151">
+              Hi ${name},
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding:8px 40px 24px;font-size:15px;line-height:1.6;color:#374151">
+              Your account has been created and you&#39;ve joined <strong>${tenantName}</strong> as a <strong>${roleName}</strong>. You&#39;re all set to start collaborating with your team.
+            </td>
+          </tr>
+
+          <!-- Info box -->
+          <tr>
+            <td style="padding:0 40px 24px">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="background-color:#f9fafb;border-radius:8px;padding:16px 20px">
+                    <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase">Workspace</p>
+                    <p style="margin:0 0 12px;font-size:14px;color:#111827">${tenantName}</p>
+                    <p style="margin:0 0 4px;font-size:12px;font-weight:600;color:#6b7280;text-transform:uppercase">Your Role</p>
+                    <p style="margin:0;font-size:14px;color:#111827">${roleName}</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA Button -->
+          <tr>
+            <td align="center" style="padding:8px 40px 24px">
+              <!--[if mso]>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${dashboardUrl}" style="height:44px;v-text-anchor:middle;width:220px" arcsize="14%" fillcolor="#4f46e5" strokecolor="#4f46e5" strokeweight="0">
+                <w:anchorlock/>
+                <center style="color:#ffffff;font-family:sans-serif;font-size:14px;font-weight:600">Go to Dashboard</center>
+              </v:roundrect>
+              <![endif]-->
+              <!--[if !mso]><!-->
+              <a href="${dashboardUrl}" target="_blank" style="display:inline-block;background-color:#4f46e5;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 32px;border-radius:6px;line-height:1.5">Go to Dashboard</a>
+              <!--<![endif]-->
+            </td>
+          </tr>
+
+          <!-- Help text -->
+          <tr>
+            <td align="center" style="padding:0 40px 24px;font-size:14px;color:#6b7280">
+              Need help getting started? <a href="mailto:support@getzygo.com" style="color:#4f46e5;text-decoration:none">Contact support</a>
+            </td>
+          </tr>
+
+          <!-- Signature -->
+          <tr>
+            <td style="padding:0 40px 32px;font-size:15px;line-height:1.6;color:#374151">
+              Welcome aboard,<br />The Zygo Team
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:0 40px">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="border-top:1px solid #e5e7eb;padding-top:24px"></td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 16px;font-size:13px;color:#6b7280">
+              <a href="https://getzygo.com/privacy" style="color:#4f46e5;text-decoration:none">Privacy Policy</a>
+              &nbsp;&bull;&nbsp;
+              <a href="https://getzygo.com/terms" style="color:#4f46e5;text-decoration:none">Terms of Service</a>
+              &nbsp;&bull;&nbsp;
+              <a href="mailto:support@getzygo.com" style="color:#4f46e5;text-decoration:none">Contact Support</a>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 8px;font-size:12px;line-height:1.5;color:#9ca3af">
+              ZYGO AI Technologies<br />Budapest, Hungary
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 32px;font-size:12px;color:#9ca3af">
+              &copy; ${year} Zygo. All rights reserved.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const rawText = `Welcome to ${options.tenantName || 'the workspace'}!
+
+Hi ${options.firstName || 'there'},
+
+Your account has been created and you've joined ${options.tenantName || 'the workspace'} as a ${options.roleName || 'Member'}. You're all set to start collaborating with your team.
+
+Workspace: ${options.tenantName || 'the workspace'}
+Your Role: ${options.roleName || 'Member'}
+
+Go to Dashboard: ${dashboardUrl}
+
+Welcome aboard,
+The Zygo Team
+
+---
+Privacy Policy: https://getzygo.com/privacy
+Terms of Service: https://getzygo.com/terms
+Support: support@getzygo.com
+
+ZYGO AI Technologies, Budapest, Hungary
+© ${year} Zygo. All rights reserved.`;
+
+  return sendEmail({
+    to: email,
+    subject: `Welcome to ${options.tenantName || 'Zygo'}!`,
+    rawHtml,
+    rawText,
+  });
+}
+
+/**
+ * Send confirmation email to the inviter when their invite is accepted
+ * Uses raw HTML for reliable rendering.
+ */
+export async function sendInviteAcceptedEmail(
+  email: string,
+  options: {
+    inviterFirstName?: string;
+    memberName: string;
+    memberEmail: string;
+    tenantName?: string;
+    tenantSlug?: string;
+    roleName?: string;
+  }
+): Promise<SendEmailResult> {
+  const inviterName = escapeHtml(options.inviterFirstName || 'there');
+  const memberName = escapeHtml(options.memberName);
+  const memberEmail = escapeHtml(options.memberEmail);
+  const tenantName = escapeHtml(options.tenantName || 'the workspace');
+  const roleName = escapeHtml(options.roleName || 'Member');
+  const tenantSlug = options.tenantSlug || 'app';
+  const membersUrl = `https://${tenantSlug}.zygo.tech/settings/users`;
+  const year = new Date().getFullYear();
+
+  if (!isSmtpConfigured()) {
+    logger.dev(` Invite accepted email would be sent to ${email}`);
+    return { sent: true };
+  }
+
+  const rawHtml = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <title>${memberName} joined ${tenantName}</title>
+  <!--[if mso]>
+  <style type="text/css">
+    table { border-collapse: collapse; }
+    .button-link { padding: 12px 24px !important; }
+  </style>
+  <![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif">
+  <div style="display:none;max-height:0;overflow:hidden">${memberName} has accepted your invitation and joined ${tenantName}</div>
+
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6">
+    <tr>
+      <td align="center" style="padding:40px 20px">
+
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;max-width:600px;width:100%">
+
+          <!-- Logo header -->
+          <tr>
+            <td align="center" style="padding:32px 40px 24px;border-bottom:1px solid #e5e7eb">
+              <img src="https://demo.zygo.tech/logo.png" alt="Zygo" width="48" height="48" style="display:block;border:0" />
+            </td>
+          </tr>
+
+          <!-- Heading -->
+          <tr>
+            <td align="center" style="padding:32px 40px 8px">
+              <h1 style="margin:0;font-size:24px;font-weight:600;color:#111827">Invitation Accepted</h1>
+            </td>
+          </tr>
+
+          <!-- Greeting -->
+          <tr>
+            <td style="padding:16px 40px 0;font-size:15px;line-height:1.6;color:#374151">
+              Hi ${inviterName},
+            </td>
+          </tr>
+
+          <!-- Message -->
+          <tr>
+            <td style="padding:8px 40px 24px;font-size:15px;line-height:1.6;color:#374151">
+              Great news! <strong>${memberName}</strong> (${memberEmail}) has accepted your invitation and joined <strong>${tenantName}</strong> as a <strong>${roleName}</strong>.
+            </td>
+          </tr>
+
+          <!-- Info box -->
+          <tr>
+            <td style="padding:0 40px 24px">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  <td style="background-color:#f0fdf4;border-left:4px solid #22c55e;border-radius:4px;padding:16px 20px">
+                    <p style="margin:0;font-size:14px;line-height:1.5;color:#166534"><strong>${memberName}</strong> is now an active member of your workspace and can start collaborating immediately.</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- CTA Button -->
+          <tr>
+            <td align="center" style="padding:8px 40px 24px">
+              <!--[if mso]>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${membersUrl}" style="height:44px;v-text-anchor:middle;width:220px" arcsize="14%" fillcolor="#4f46e5" strokecolor="#4f46e5" strokeweight="0">
+                <w:anchorlock/>
+                <center style="color:#ffffff;font-family:sans-serif;font-size:14px;font-weight:600">View Team Members</center>
+              </v:roundrect>
+              <![endif]-->
+              <!--[if !mso]><!-->
+              <a href="${membersUrl}" target="_blank" style="display:inline-block;background-color:#4f46e5;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 32px;border-radius:6px;line-height:1.5">View Team Members</a>
+              <!--<![endif]-->
+            </td>
+          </tr>
+
+          <!-- Signature -->
+          <tr>
+            <td style="padding:0 40px 32px;font-size:15px;line-height:1.6;color:#374151">
+              Best,<br />The Zygo Team
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:0 40px">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="border-top:1px solid #e5e7eb;padding-top:24px"></td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 16px;font-size:13px;color:#6b7280">
+              <a href="https://getzygo.com/privacy" style="color:#4f46e5;text-decoration:none">Privacy Policy</a>
+              &nbsp;&bull;&nbsp;
+              <a href="https://getzygo.com/terms" style="color:#4f46e5;text-decoration:none">Terms of Service</a>
+              &nbsp;&bull;&nbsp;
+              <a href="mailto:support@getzygo.com" style="color:#4f46e5;text-decoration:none">Contact Support</a>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 8px;font-size:12px;line-height:1.5;color:#9ca3af">
+              ZYGO AI Technologies<br />Budapest, Hungary
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 32px;font-size:12px;color:#9ca3af">
+              &copy; ${year} Zygo. All rights reserved.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const rawText = `Invitation Accepted
+
+Hi ${options.inviterFirstName || 'there'},
+
+Great news! ${options.memberName} (${options.memberEmail}) has accepted your invitation and joined ${options.tenantName || 'the workspace'} as a ${options.roleName || 'Member'}.
+
+${options.memberName} is now an active member of your workspace and can start collaborating immediately.
+
+View Team Members: ${membersUrl}
+
+Best,
+The Zygo Team
+
+---
+Privacy Policy: https://getzygo.com/privacy
+Terms of Service: https://getzygo.com/terms
+Support: support@getzygo.com
+
+ZYGO AI Technologies, Budapest, Hungary
+© ${year} Zygo. All rights reserved.`;
+
+  return sendEmail({
+    to: email,
+    subject: `${options.memberName} has joined ${options.tenantName || 'your workspace'} - Zygo`,
+    rawHtml,
+    rawText,
+  });
+}
+
 /** Escape HTML special characters */
 function escapeHtml(str: string): string {
   return str
@@ -1079,4 +1650,6 @@ export const emailService = {
   sendTenantVerificationEmail,
   sendCriticalActionVerificationEmail,
   sendTeamInviteEmail,
+  sendInviteWelcomeEmail,
+  sendInviteAcceptedEmail,
 };

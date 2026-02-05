@@ -17,7 +17,8 @@ import { getDb } from '../../db/client';
 import { auditLogs, tenantMembers } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { notify } from '../../services/notification-hub.service';
-import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from '../../services/notification-configs';
+import { NOTIFICATION_CONFIGS } from '../../services/notification-configs';
+import { sendMfaEnabledEmail } from '../../services/email.service';
 import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
 const app = new Hono();
@@ -131,7 +132,7 @@ app.post(
       columns: { tenantId: true },
     });
 
-    // Send MFA enabled notification (email + in-app)
+    // Send MFA enabled notification (in-app only, email sent separately with raw HTML)
     const config = NOTIFICATION_CONFIGS.mfa_enabled;
     notify({
       userId: user.id,
@@ -143,12 +144,14 @@ app.post(
       severity: config.severity,
       actionRoute: config.actionRoute,
       actionLabel: config.actionLabel,
-      emailTemplate: EMAIL_TEMPLATES.mfaEnabled({
-        firstName: user.firstName || undefined,
-        method: 'totp',
-      }),
-      emailSubject: config.emailSubject,
     }).catch((err) => console.error('[MFA] Notification failed:', err));
+
+    // Send MFA enabled email directly (raw HTML for reliable rendering)
+    sendMfaEnabledEmail(
+      user.email,
+      user.firstName || undefined,
+      'totp',
+    ).catch((err) => console.error('[MFA] Email failed:', err));
 
     return c.json({
       enabled: true,

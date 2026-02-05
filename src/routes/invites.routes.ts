@@ -20,6 +20,7 @@ import { verifyMagicLink } from '../services/magic-link.service';
 import { createAuthToken, type TenantMembership } from '../services/auth-token.service';
 import { createAuthUser, generateSessionForUser } from '../services/supabase.service';
 import { hashPassword } from '../services/user.service';
+import { sendInviteWelcomeEmail } from '../services/email.service';
 import { getDb } from '../db/client';
 import { auditLogs, users, tenantMembers, tenants, roles } from '../db/schema';
 import type { User } from '../db/schema';
@@ -398,7 +399,15 @@ app.post('/:token/signup-accept', rateLimit(RATE_LIMITS.AUTH), zValidator('json'
     }),
   ]);
 
-  // 9. Return auth data (frontend will store and redirect)
+  // 9. Send welcome email to new user (non-blocking)
+  sendInviteWelcomeEmail(newUser.email, {
+    firstName: newUser.firstName || undefined,
+    tenantName: invite.tenant.name,
+    tenantSlug: invite.tenant.slug,
+    roleName: targetMembership.roleName,
+  }).catch((err) => console.error('[Invite] Welcome email failed:', err));
+
+  // 10. Return auth data (frontend will store and redirect)
   return c.json({
     success: true,
     auth_token: authToken,
