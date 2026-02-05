@@ -32,13 +32,15 @@ import { TenantDeletionCancelled } from '../emails/templates/tenant-deletion-can
 import { MagicLink } from '../emails/templates/magic-link';
 import { TenantEmailVerification } from '../emails/templates/tenant-email-verification';
 import { CriticalActionVerification } from '../emails/templates/critical-action-verification';
-import { TeamInvite } from '../emails/templates/team-invite';
+// TeamInvite React Email template replaced with raw HTML for reliable Gmail rendering
 
 // Types
 interface SendEmailOptions {
   to: string;
   subject: string;
-  template: ReactElement;
+  template?: ReactElement;
+  rawHtml?: string;
+  rawText?: string;
   headers?: Record<string, string>;
 }
 
@@ -80,15 +82,15 @@ function isSmtpConfigured(): boolean {
 }
 
 /**
- * Send an email using a React Email template
+ * Send an email using a React Email template or raw HTML
  */
-export async function sendEmail({ to, subject, template, headers = {} }: SendEmailOptions): Promise<SendEmailResult> {
+export async function sendEmail({ to, subject, template, rawHtml, rawText, headers = {} }: SendEmailOptions): Promise<SendEmailResult> {
   const env = getEnv();
 
   try {
     // Render HTML and plain text versions
-    const html = await render(template);
-    const text = await render(template, { plainText: true });
+    const html = rawHtml || await render(template!);
+    const text = rawText || await render(template!, { plainText: true });
 
     if (!isSmtpConfigured()) {
       logger.dev(`SMTP not configured, skipping email to ${to}: ${subject}`);
@@ -838,7 +840,8 @@ export async function sendCriticalActionVerificationEmail(
 
 /**
  * Send team invite email
- * Used when inviting a user to join a tenant/workspace
+ * Used when inviting a user to join a tenant/workspace.
+ * Uses raw HTML (not React Email) for reliable Gmail rendering.
  */
 export async function sendTeamInviteEmail(
   email: string,
@@ -857,12 +860,174 @@ export async function sendTeamInviteEmail(
 ): Promise<SendEmailResult> {
   let acceptUrl: string;
   if (options.magicLinkToken) {
-    // One-click magic accept (existing users)
     acceptUrl = `https://api.zygo.tech/api/v1/invites/magic-accept?invite=${options.inviteToken}&ml=${options.magicLinkToken}`;
   } else {
-    // Standard invite URL (new users → frontend fallback)
     acceptUrl = `https://${options.tenantSlug}.zygo.tech/invite/${options.inviteToken}`;
   }
+
+  const inviteeName = escapeHtml(options.inviteeName || 'there');
+  const inviterName = escapeHtml(options.inviterName || 'Someone');
+  const tenantName = escapeHtml(options.tenantName || 'a workspace');
+  const roleName = escapeHtml(options.roleName || 'Member');
+  const expiresInDays = options.expiresInDays || 7;
+  const year = new Date().getFullYear();
+
+  const expiryText = options.isExistingUser
+    ? 'This link expires in 24 hours. After that, you can still accept by signing in to the workspace.'
+    : `This invitation expires in ${expiresInDays} days.`;
+
+  const messageBlock = options.message
+    ? `<tr><td style="padding:0 40px 24px"><table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="background-color:#f3f4f6;border-radius:8px;padding:16px 20px;font-size:14px;line-height:1.5;color:#6b7280;font-style:italic">&ldquo;${escapeHtml(options.message)}&rdquo;</td></tr></table></td></tr>`
+    : '';
+
+  const rawHtml = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <title>Team Invitation</title>
+  <!--[if mso]>
+  <style type="text/css">
+    table { border-collapse: collapse; }
+    .button-link { padding: 12px 24px !important; }
+  </style>
+  <![endif]-->
+</head>
+<body style="margin:0;padding:0;background-color:#f3f4f6;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif">
+  <!-- Preview text -->
+  <div style="display:none;max-height:0;overflow:hidden">${inviterName} invited you to join ${tenantName} on Zygo</div>
+
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f3f4f6">
+    <tr>
+      <td align="center" style="padding:40px 20px">
+
+        <!-- Main container -->
+        <table width="600" cellpadding="0" cellspacing="0" border="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;max-width:600px;width:100%">
+
+          <!-- Logo header -->
+          <tr>
+            <td align="center" style="padding:32px 40px 24px;border-bottom:1px solid #e5e7eb">
+              <img src="https://demo.zygo.tech/logo.png" alt="Zygo" width="48" height="48" style="display:block;border:0" />
+            </td>
+          </tr>
+
+          <!-- Heading -->
+          <tr>
+            <td align="center" style="padding:32px 40px 8px">
+              <h1 style="margin:0;font-size:24px;font-weight:600;color:#111827">You&#39;re invited!</h1>
+            </td>
+          </tr>
+
+          <!-- Greeting -->
+          <tr>
+            <td style="padding:16px 40px 0;font-size:15px;line-height:1.6;color:#374151">
+              Hi ${inviteeName},
+            </td>
+          </tr>
+
+          <!-- Invite details -->
+          <tr>
+            <td style="padding:8px 40px 24px;font-size:15px;line-height:1.6;color:#374151">
+              <strong>${inviterName}</strong> has invited you to join <strong>${tenantName}</strong> on Zygo as a <strong>${roleName}</strong>.
+            </td>
+          </tr>
+
+          ${messageBlock}
+
+          <!-- CTA Button -->
+          <tr>
+            <td align="center" style="padding:8px 40px 24px">
+              <!--[if mso]>
+              <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${acceptUrl}" style="height:44px;v-text-anchor:middle;width:220px" arcsize="14%" fillcolor="#4f46e5" strokecolor="#4f46e5" strokeweight="0">
+                <w:anchorlock/>
+                <center style="color:#ffffff;font-family:sans-serif;font-size:14px;font-weight:600">Accept Invitation</center>
+              </v:roundrect>
+              <![endif]-->
+              <!--[if !mso]><!-->
+              <a href="${acceptUrl}" target="_blank" style="display:inline-block;background-color:#4f46e5;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:12px 32px;border-radius:6px;line-height:1.5">Accept Invitation</a>
+              <!--<![endif]-->
+            </td>
+          </tr>
+
+          <!-- Expiry note -->
+          <tr>
+            <td align="center" style="padding:0 40px 24px;font-size:13px;color:#6b7280">
+              ${expiryText}
+            </td>
+          </tr>
+
+          <!-- Safety note -->
+          <tr>
+            <td style="padding:0 40px 24px;font-size:14px;line-height:1.6;color:#374151">
+              If you didn&#39;t expect this invitation, you can safely ignore this email or contact <a href="mailto:support@getzygo.com" style="color:#4f46e5;text-decoration:none">our support team</a>.
+            </td>
+          </tr>
+
+          <!-- Signature -->
+          <tr>
+            <td style="padding:0 40px 32px;font-size:15px;line-height:1.6;color:#374151">
+              Best,<br />The Zygo Team
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="padding:0 40px">
+              <table width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr><td style="border-top:1px solid #e5e7eb;padding-top:24px"></td></tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 16px;font-size:13px;color:#6b7280">
+              <a href="https://getzygo.com/privacy" style="color:#4f46e5;text-decoration:none">Privacy Policy</a>
+              &nbsp;&bull;&nbsp;
+              <a href="https://getzygo.com/terms" style="color:#4f46e5;text-decoration:none">Terms of Service</a>
+              &nbsp;&bull;&nbsp;
+              <a href="mailto:support@getzygo.com" style="color:#4f46e5;text-decoration:none">Contact Support</a>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 8px;font-size:12px;line-height:1.5;color:#9ca3af">
+              ZYGO AI Technologies<br />Budapest, Hungary
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:0 40px 32px;font-size:12px;color:#9ca3af">
+              &copy; ${year} Zygo. All rights reserved.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const rawText = `You're invited!
+
+Hi ${options.inviteeName || 'there'},
+
+${options.inviterName || 'Someone'} has invited you to join ${options.tenantName || 'a workspace'} on Zygo as a ${options.roleName || 'Member'}.
+
+${options.message ? `"${options.message}"\n\n` : ''}Accept the invitation: ${acceptUrl}
+
+${expiryText}
+
+If you didn't expect this invitation, you can safely ignore this email.
+
+Best,
+The Zygo Team
+
+---
+Privacy Policy: https://getzygo.com/privacy
+Terms of Service: https://getzygo.com/terms
+Support: support@getzygo.com
+
+ZYGO AI Technologies, Budapest, Hungary
+© ${year} Zygo. All rights reserved.`;
 
   if (!isSmtpConfigured()) {
     logger.dev(` Team invite email would be sent to ${email}:`, {
@@ -875,17 +1040,18 @@ export async function sendTeamInviteEmail(
   return sendEmail({
     to: email,
     subject: `${options.inviterName || 'Someone'} invited you to join ${options.tenantName || 'a workspace'} on Zygo`,
-    template: TeamInvite({
-      inviteeName: options.inviteeName,
-      inviterName: options.inviterName,
-      tenantName: options.tenantName,
-      roleName: options.roleName,
-      message: options.message,
-      acceptUrl,
-      expiresInDays: options.expiresInDays || 7,
-      isExistingUser: options.isExistingUser,
-    }),
+    rawHtml,
+    rawText,
   });
+}
+
+/** Escape HTML special characters */
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 // Export the service object for backwards compatibility
