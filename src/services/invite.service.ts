@@ -58,13 +58,15 @@ export async function createInvite(params: {
   email: string;
   roleId: string;
   invitedBy: string;
+  firstName?: string;
+  lastName?: string;
   message?: string;
 }): Promise<{
   success: boolean;
   error?: string;
   invite?: TenantInvite;
 }> {
-  const { tenantId, email, roleId, invitedBy, message } = params;
+  const { tenantId, email, roleId, invitedBy, firstName, lastName, message } = params;
   const db = getDb();
   const normalizedEmail = email.toLowerCase().trim();
 
@@ -193,7 +195,9 @@ export async function createInvite(params: {
   }
 
   await sendTeamInviteEmail(normalizedEmail, {
-    inviteeName: existingUser?.firstName || undefined,
+    inviteeName: existingUser
+      ? `${existingUser.firstName || ''} ${existingUser.lastName || ''}`.trim() || undefined
+      : `${firstName || ''} ${lastName || ''}`.trim() || undefined,
     inviterName,
     tenantName: tenant?.name || 'a workspace',
     roleName: role.name,
@@ -388,7 +392,7 @@ export async function resendInvite(params: {
   const inviteeUser = invite.userId
     ? await db.query.users.findFirst({
         where: eq(users.id, invite.userId),
-        columns: { firstName: true },
+        columns: { firstName: true, lastName: true },
       })
     : null;
 
@@ -406,7 +410,9 @@ export async function resendInvite(params: {
   }
 
   await sendTeamInviteEmail(invite.email, {
-    inviteeName: inviteeUser?.firstName || undefined,
+    inviteeName: inviteeUser
+      ? `${inviteeUser.firstName || ''} ${inviteeUser.lastName || ''}`.trim() || undefined
+      : undefined,
     inviterName,
     tenantName: tenant?.name || 'a workspace',
     roleName: role?.name || 'Member',

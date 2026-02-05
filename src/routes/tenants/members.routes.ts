@@ -277,6 +277,8 @@ app.get('/:tenantId/members/invites', async (c) => {
 const inviteMemberSchema = z.object({
   email: z.string().email('Invalid email address'),
   role_id: z.string().uuid('Invalid role ID'),
+  first_name: z.string().max(100).optional(),
+  last_name: z.string().max(100).optional(),
   message: z.string().max(500).optional(),
 });
 
@@ -293,7 +295,7 @@ app.post(
   async (c) => {
     const user = c.get('user') as User;
     const tenantId = c.req.param('tenantId');
-    const { email, role_id: roleId, message } = c.req.valid('json');
+    const { email, role_id: roleId, first_name: firstName, last_name: lastName, message } = c.req.valid('json');
     const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
     const userAgent = c.req.header('user-agent');
     const db = getDb();
@@ -328,6 +330,8 @@ app.post(
       email: email.toLowerCase().trim(),
       roleId,
       invitedBy: user.id,
+      firstName,
+      lastName,
       message,
     });
 
