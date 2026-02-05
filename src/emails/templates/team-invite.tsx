@@ -25,6 +25,7 @@ interface TeamInviteProps {
   message?: string;
   acceptUrl: string;
   expiresInDays?: number;
+  isExistingUser?: boolean;
 }
 
 export function TeamInvite({
@@ -35,6 +36,7 @@ export function TeamInvite({
   message,
   acceptUrl,
   expiresInDays = 7,
+  isExistingUser = false,
 }: TeamInviteProps) {
   return (
     <Html>
@@ -66,8 +68,16 @@ export function TeamInvite({
               <Button href={acceptUrl}>Accept Invitation</Button>
             </Section>
 
+            {isExistingUser && (
+              <Text style={helperTextStyle}>
+                Just click the button above — no sign-in needed.
+              </Text>
+            )}
+
             <Text style={expiryStyle}>
-              This invitation expires in {expiresInDays} days.
+              {isExistingUser
+                ? 'This link expires in 24 hours. After that, you can still accept by signing in to the workspace.'
+                : `This invitation expires in ${expiresInDays} days.`}
             </Text>
 
             <Section style={dividerStyle} />
@@ -183,6 +193,13 @@ const messageTextStyle: React.CSSProperties = {
 const buttonContainerStyle: React.CSSProperties = {
   textAlign: 'center' as const,
   margin: '32px 0',
+};
+
+const helperTextStyle: React.CSSProperties = {
+  fontSize: '13px',
+  color: '#6b7280',
+  textAlign: 'center' as const,
+  margin: '-16px 0 8px 0',
 };
 
 const expiryStyle: React.CSSProperties = {

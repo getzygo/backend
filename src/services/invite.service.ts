@@ -25,6 +25,7 @@ import {
 } from '../db/schema';
 import { canAddMember } from './member.service';
 import { sendTeamInviteEmail } from './email.service';
+import { createMagicLinkForInvite } from './magic-link.service';
 import { notify } from './notification-hub.service';
 import { getNotificationConfig } from './notification-configs';
 
@@ -184,6 +185,13 @@ export async function createInvite(params: {
     ? `${inviter.firstName || ''} ${inviter.lastName || ''}`.trim() || inviter.email
     : 'A team member';
 
+  // Generate magic link for existing users (one-click accept)
+  let magicLinkToken: string | undefined;
+  if (existingUser) {
+    const mlResult = await createMagicLinkForInvite(normalizedEmail);
+    if (mlResult.success) magicLinkToken = mlResult.token;
+  }
+
   await sendTeamInviteEmail(normalizedEmail, {
     inviteeName: existingUser?.firstName || undefined,
     inviterName,
@@ -193,6 +201,8 @@ export async function createInvite(params: {
     inviteToken: token,
     tenantSlug: tenant?.slug || 'app',
     expiresInDays: INVITE_EXPIRATION_DAYS,
+    magicLinkToken,
+    isExistingUser: !!existingUser,
   });
 
   // Send in-app notification to invited user (if they have an account)
@@ -387,6 +397,14 @@ export async function resendInvite(params: {
     ? `${inviter.firstName || ''} ${inviter.lastName || ''}`.trim() || inviter.email
     : 'A team member';
 
+  // Generate magic link for existing users (one-click accept)
+  let magicLinkToken: string | undefined;
+  const isExistingUser = !!invite.userId;
+  if (isExistingUser) {
+    const mlResult = await createMagicLinkForInvite(invite.email);
+    if (mlResult.success) magicLinkToken = mlResult.token;
+  }
+
   await sendTeamInviteEmail(invite.email, {
     inviteeName: inviteeUser?.firstName || undefined,
     inviterName,
@@ -396,6 +414,8 @@ export async function resendInvite(params: {
     inviteToken: newToken,
     tenantSlug: tenant?.slug || 'app',
     expiresInDays: INVITE_EXPIRATION_DAYS,
+    magicLinkToken,
+    isExistingUser,
   });
 
   return {

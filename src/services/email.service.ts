@@ -858,9 +858,18 @@ export async function sendTeamInviteEmail(
     inviteToken: string;
     tenantSlug: string;
     expiresInDays?: number;
+    magicLinkToken?: string;
+    isExistingUser?: boolean;
   }
 ): Promise<SendEmailResult> {
-  const acceptUrl = `https://${options.tenantSlug}.zygo.tech/invite/${options.inviteToken}`;
+  let acceptUrl: string;
+  if (options.magicLinkToken) {
+    // One-click magic accept (existing users)
+    acceptUrl = `https://api.zygo.tech/api/v1/invites/magic-accept?invite=${options.inviteToken}&ml=${options.magicLinkToken}`;
+  } else {
+    // Standard invite URL (new users → frontend fallback)
+    acceptUrl = `https://${options.tenantSlug}.zygo.tech/invite/${options.inviteToken}`;
+  }
 
   if (!isSmtpConfigured()) {
     logger.dev(` Team invite email would be sent to ${email}:`, {
@@ -881,6 +890,7 @@ export async function sendTeamInviteEmail(
       message: options.message,
       acceptUrl,
       expiresInDays: options.expiresInDays || 7,
+      isExistingUser: options.isExistingUser,
     }),
   });
 }

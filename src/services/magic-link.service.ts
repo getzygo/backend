@@ -15,6 +15,9 @@ import type { MagicLink } from '../db/schema/security';
 // Magic link expiration in minutes
 const MAGIC_LINK_EXPIRY_MINUTES = 15;
 
+// Magic link expiration for invite flows (24 hours)
+const INVITE_MAGIC_LINK_EXPIRY_HOURS = 24;
+
 // Base URL for magic link verification
 const MAGIC_LINK_BASE_URL = process.env.MAGIC_LINK_BASE_URL || 'https://getzygo.com/magic-link/verify';
 
@@ -213,6 +216,46 @@ export async function verifyMagicLink(
 }
 
 /**
+ * Create a magic link token for invite acceptance (existing users only).
+ * - 24-hour TTL (enterprise-friendly)
+ * - No email sending (invite service handles that)
+ * - No rate limiting (invite creation/resend has its own limits)
+ * - Returns the raw unhashed token for URL construction
+ */
+export async function createMagicLinkForInvite(email: string): Promise<{
+  success: boolean;
+  token?: string;
+  expiresAt?: Date;
+  error?: string;
+}> {
+  const db = getDb();
+  const normalizedEmail = email.toLowerCase().trim();
+
+  // Verify user exists (required for invite magic links)
+  const user = await db.query.users.findFirst({
+    where: eq(users.email, normalizedEmail),
+  });
+
+  if (!user) {
+    return { success: false, error: 'user_not_found' };
+  }
+
+  // Generate token
+  const token = generateToken();
+  const tokenHash = hashToken(token);
+  const expiresAt = new Date(Date.now() + INVITE_MAGIC_LINK_EXPIRY_HOURS * 60 * 60 * 1000);
+
+  // Store magic link
+  await db.insert(magicLinks).values({
+    email: normalizedEmail,
+    tokenHash,
+    expiresAt,
+  });
+
+  return { success: true, token, expiresAt };
+}
+
+/**
  * Clean up expired magic links (for scheduled cleanup).
  */
 export async function cleanupExpiredMagicLinks(): Promise<number> {
@@ -233,6 +276,7 @@ export async function cleanupExpiredMagicLinks(): Promise<number> {
 
 export default {
   createMagicLink,
+  createMagicLinkForInvite,
   verifyMagicLink,
   cleanupExpiredMagicLinks,
 };
