@@ -101,6 +101,12 @@ export async function sendEmail({ to, subject, template, headers = {} }: SendEma
     );
 
     console.log(`[Email] Rendered "${subject}": html=${html.length} chars, text=${text.length} chars`);
+    // Debug: dump full HTML to file for inspection
+    try {
+      const fs = await import('fs');
+      fs.writeFileSync('/tmp/last-email-debug.html', html, 'utf8');
+      console.log(`[Email] Full HTML dumped to /tmp/last-email-debug.html`);
+    } catch {}
     if (html.length < 100) {
       console.warn(`[Email] WARNING: HTML body is suspiciously short (${html.length} chars):`, html);
     }
