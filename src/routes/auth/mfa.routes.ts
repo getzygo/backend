@@ -17,7 +17,7 @@ import { getDb } from '../../db/client';
 import { auditLogs, tenantMembers } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { notify } from '../../services/notification-hub.service';
-import { NOTIFICATION_CONFIGS } from '../../services/notification-configs';
+import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from '../../services/notification-configs';
 import { sendMfaEnabledEmail } from '../../services/email.service';
 import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 
