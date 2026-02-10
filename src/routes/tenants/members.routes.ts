@@ -360,6 +360,7 @@ app.post(
       // Audit failed attempt
       await db.insert(auditLogs).values({
         userId: user.id,
+        tenantId,
         action: 'member_invite_failed',
         resourceType: 'tenant_invite',
         resourceId: tenantId,
@@ -384,6 +385,7 @@ app.post(
     // Audit successful invite
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'member_invited',
       resourceType: 'tenant_invite',
       resourceId: result.invite!.id,
@@ -479,6 +481,7 @@ app.delete('/:tenantId/members/invites/:inviteId', async (c) => {
   // Audit
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'invite_cancelled',
     resourceType: 'tenant_invite',
     resourceId: inviteId,
@@ -551,6 +554,7 @@ app.post('/:tenantId/members/invites/:inviteId/resend', async (c) => {
   // Audit
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'invite_resent',
     resourceType: 'tenant_invite',
     resourceId: inviteId,
@@ -664,6 +668,7 @@ app.patch(
     // Audit
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'member_role_updated',
       resourceType: 'tenant_member',
       resourceId: memberId,
@@ -787,6 +792,7 @@ app.post(
     // Audit
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'member_suspended',
       resourceType: 'tenant_member',
       resourceId: memberId,
@@ -884,6 +890,7 @@ app.post('/:tenantId/members/:memberId/unsuspend', async (c) => {
   // Audit
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'member_unsuspended',
     resourceType: 'tenant_member',
     resourceId: memberId,
@@ -957,6 +964,7 @@ app.post('/:tenantId/members/:memberId/restore', async (c) => {
   // Audit
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'member_restored',
     resourceType: 'tenant_member',
     resourceId: memberId,
@@ -1075,6 +1083,7 @@ app.post(
     // Audit
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'data_ownership_transferred',
       resourceType: 'tenant_member',
       resourceId: sourceMemberId,
@@ -1188,6 +1197,7 @@ app.delete('/:tenantId/members/:memberId', async (c) => {
   // Audit
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'member_removed',
     resourceType: 'tenant_member',
     resourceId: memberId,

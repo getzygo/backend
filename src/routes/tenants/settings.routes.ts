@@ -385,6 +385,7 @@ app.patch(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'tenant_legal_settings_updated',
       resourceType: 'tenant',
       resourceId: tenantId,
@@ -531,6 +532,7 @@ app.patch(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'tenant_billing_settings_updated',
       resourceType: 'tenant',
       resourceId: tenantId,
@@ -665,6 +667,7 @@ app.post('/:tenantId/settings/logo', async (c) => {
   // Audit log
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'company_logo_uploaded',
     resourceType: 'tenant',
     resourceId: tenantId,
@@ -927,6 +930,7 @@ app.post(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'tenant_deletion_challenge_created',
       resourceType: 'tenant',
       resourceId: tenantId,
@@ -1019,6 +1023,7 @@ app.post(
     if (!emailVerification.verified) {
       await db.insert(auditLogs).values({
         userId: user.id,
+        tenantId,
         action: 'tenant_deletion_email_verification_failed',
         resourceType: 'tenant',
         resourceId: tenantId,
@@ -1056,6 +1061,7 @@ app.post(
       if (!mfaVerification.verified) {
         await db.insert(auditLogs).values({
           userId: user.id,
+          tenantId,
           action: 'tenant_deletion_mfa_verification_failed',
           resourceType: 'tenant',
           resourceId: tenantId,
@@ -1102,6 +1108,7 @@ app.post(
     if (!result.success) {
       await db.insert(auditLogs).values({
         userId: user.id,
+        tenantId,
         action: 'tenant_deletion_request_failed',
         resourceType: 'tenant',
         resourceId: tenantId,
@@ -1123,6 +1130,7 @@ app.post(
     // Audit successful request
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'tenant_deletion_requested',
       resourceType: 'tenant',
       resourceId: tenantId,
@@ -1242,6 +1250,7 @@ app.delete('/:tenantId/settings/deletion', async (c) => {
     // Audit failed attempt
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'tenant_deletion_cancel_failed',
       resourceType: 'tenant',
       resourceId: tenantId,
@@ -1265,6 +1274,7 @@ app.delete('/:tenantId/settings/deletion', async (c) => {
   // Audit successful cancellation
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'tenant_deletion_cancelled',
     resourceType: 'tenant',
     resourceId: tenantId,

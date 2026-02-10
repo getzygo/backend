@@ -207,6 +207,7 @@ app.put('/:tenantId/sso', zValidator('json', ssoConfigSchema), async (c) => {
   // Audit log
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'sso_configured',
     resourceType: 'tenant_security_config',
     resourceId: tenantId,
@@ -277,6 +278,7 @@ app.delete('/:tenantId/sso', async (c) => {
   // Audit log
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'sso_disabled',
     resourceType: 'tenant_security_config',
     resourceId: tenantId,

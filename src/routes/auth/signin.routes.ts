@@ -334,6 +334,7 @@ app.post('/', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json', signinSchema)
   // Audit log
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId: targetTenant?.id || undefined,
     action: 'login',
     resourceType: 'user',
     resourceId: user.id,
@@ -628,6 +629,7 @@ app.post('/switch-tenant', zValidator('json', switchTenantSchema), async (c) => 
   // Audit log
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId: tenant.id,
     action: 'tenant_switch',
     resourceType: 'tenant',
     resourceId: tenant.id,

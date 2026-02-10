@@ -270,6 +270,7 @@ app.post('/me/avatar', authMiddleware, tenantMiddleware, requireTenantMembership
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId: tenantId || undefined,
       action: 'avatar_uploaded',
       resourceType: 'user',
       resourceId: user.id,
@@ -468,6 +469,7 @@ app.patch('/me', authMiddleware, optionalTenantMiddleware, zValidator('json', up
   ];
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId: tenantId || undefined,
     action: 'profile_updated',
     resourceType: 'user',
     resourceId: user.id,

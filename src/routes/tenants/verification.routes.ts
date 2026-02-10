@@ -145,6 +145,7 @@ app.post(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'tenant_billing_email_verified',
       resourceType: 'tenant',
       resourceId: tenantId,
@@ -252,6 +253,7 @@ app.post(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'tenant_billing_phone_verified',
       resourceType: 'tenant',
       resourceId: tenantId,
@@ -359,6 +361,7 @@ app.post(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'tenant_phone_verified',
       resourceType: 'tenant',
       resourceId: tenantId,
@@ -490,6 +493,7 @@ app.post(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'tenant_contact_email_verified',
       resourceType: 'tenant_contact',
       resourceId: contactId,
@@ -620,6 +624,7 @@ app.post(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'tenant_contact_phone_verified',
       resourceType: 'tenant_contact',
       resourceId: contactId,

@@ -91,6 +91,7 @@ app.post('/', zValidator('json', verifyTokenSchema), async (c) => {
   // Audit log
   await db.insert(auditLogs).values({
     userId: payload.userId,
+    tenantId: payload.tenantId,
     action: 'token_verified',
     resourceType: 'auth_token',
     resourceId: payload.tenantId,

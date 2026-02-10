@@ -285,6 +285,7 @@ app.post('/:tenantId/domains', zValidator('json', claimDomainSchema), async (c) 
   // Audit log
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'domain_claimed',
     resourceType: 'tenant',
     resourceId: tenantId,
@@ -398,6 +399,7 @@ app.post('/:tenantId/domains/:domain/verify', async (c) => {
   // Audit log
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'domain_verified',
     resourceType: 'tenant',
     resourceId: tenantId,
@@ -474,6 +476,7 @@ app.delete('/:tenantId/domains/:domain', async (c) => {
   // Audit log
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'domain_released',
     resourceType: 'tenant',
     resourceId: tenantId,

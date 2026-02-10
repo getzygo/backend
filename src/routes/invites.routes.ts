@@ -185,6 +185,7 @@ app.get('/magic-accept', rateLimit(RATE_LIMITS.AUTH), async (c) => {
   await Promise.all([
     db.insert(auditLogs).values({
       userId: user.id,
+      tenantId: invite.tenantId,
       action: 'login',
       resourceType: 'user',
       resourceId: user.id,
@@ -195,6 +196,7 @@ app.get('/magic-accept', rateLimit(RATE_LIMITS.AUTH), async (c) => {
     }),
     db.insert(auditLogs).values({
       userId: user.id,
+      tenantId: invite.tenantId,
       action: 'invite_accepted',
       resourceType: 'tenant_invite',
       resourceId: invite.id,
@@ -373,6 +375,7 @@ app.post('/:token/signup-accept', rateLimit(RATE_LIMITS.AUTH), zValidator('json'
   await Promise.all([
     db.insert(auditLogs).values({
       userId: newUser.id,
+      tenantId: invite.tenantId,
       action: 'signup',
       resourceType: 'user',
       resourceId: newUser.id,
@@ -383,6 +386,7 @@ app.post('/:token/signup-accept', rateLimit(RATE_LIMITS.AUTH), zValidator('json'
     }),
     db.insert(auditLogs).values({
       userId: newUser.id,
+      tenantId: invite.tenantId,
       action: 'invite_accepted',
       resourceType: 'tenant_invite',
       resourceId: invite.id,
@@ -511,6 +515,7 @@ app.post('/:token/accept', authMiddleware, async (c) => {
     if (invite) {
       await db.insert(auditLogs).values({
         userId: user.id,
+        tenantId: invite.tenantId,
         action: 'invite_accept_failed',
         resourceType: 'tenant_invite',
         resourceId: invite.id,
@@ -536,6 +541,7 @@ app.post('/:token/accept', authMiddleware, async (c) => {
   // Audit successful acceptance
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId: invite!.tenantId,
     action: 'invite_accepted',
     resourceType: 'tenant_invite',
     resourceId: invite!.id,

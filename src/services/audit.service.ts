@@ -269,13 +269,17 @@ export async function queryAuditLogs(options: AuditQueryOptions): Promise<{
   total: number;
 }> {
   const db = getDb();
-  const { userId, action, resourceType, startDate, endDate, limit = 50, offset = 0 } = options;
+  const { userId, tenantId, action, resourceType, startDate, endDate, limit = 50, offset = 0 } = options;
 
   // Build conditions
   const conditions = [];
 
   if (userId) {
     conditions.push(eq(auditLogs.userId, userId));
+  }
+
+  if (tenantId) {
+    conditions.push(eq(auditLogs.tenantId, tenantId));
   }
 
   if (action) {
@@ -353,6 +357,7 @@ export async function getNotificationAuditLogs(
     .where(
       and(
         eq(auditLogs.userId, userId),
+        eq(auditLogs.tenantId, tenantId),
         sql`${auditLogs.action} = ANY(${notificationActions})`
       )
     )

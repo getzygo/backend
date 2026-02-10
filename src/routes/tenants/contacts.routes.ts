@@ -228,6 +228,7 @@ app.post(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'contact_created',
       resourceType: 'tenant_contact',
       resourceId: contact.id,
@@ -393,6 +394,7 @@ app.patch(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'contact_updated',
       resourceType: 'tenant_contact',
       resourceId: contactId,
@@ -526,6 +528,7 @@ app.delete('/:tenantId/contacts/:contactId', async (c) => {
   // Audit log
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId,
     action: 'contact_deleted',
     resourceType: 'tenant_contact',
     resourceId: contactId,

@@ -285,6 +285,7 @@ app.post('/switch', zValidator('json', switchTenantSchema), async (c) => {
   // Audit log
   await db.insert(auditLogs).values({
     userId: user.id,
+    tenantId: targetTenantId,
     action: 'tenant_switch',
     resourceType: 'tenant',
     resourceId: targetTenantId,
@@ -565,6 +566,7 @@ app.patch(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'security_config_updated',
       resourceType: 'tenant_security_config',
       resourceId: tenantId,
@@ -733,6 +735,7 @@ app.patch(
     // Audit log
     await db.insert(auditLogs).values({
       userId: user.id,
+      tenantId,
       action: 'billing_info_updated',
       resourceType: 'tenant',
       resourceId: tenantId,

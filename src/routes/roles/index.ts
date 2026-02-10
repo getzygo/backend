@@ -442,6 +442,17 @@ app.post('/:id/members', zValidator('json', assignRoleSchema), async (c) => {
     return c.json({ error: 'forbidden', message: 'Permission denied' }, 403);
   }
 
+  // Prevent self-assignment (privilege escalation prevention)
+  if (body.user_id === userId) {
+    return c.json(
+      {
+        error: 'self_assignment',
+        message: 'Cannot assign roles to yourself',
+      },
+      400
+    );
+  }
+
   // Get role
   const role = await getRoleById(roleId, tenantId);
   if (!role) {
