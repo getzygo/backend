@@ -27,7 +27,7 @@ import {
   unlinkSocialLogin,
   getUserSocialLogins,
 } from '../../services/user.service';
-import { getUserTenants, createTenant, isSlugAvailable, getTenantMembershipWithRole } from '../../services/tenant.service';
+import { getUserTenants, createTenant, isSlugAvailable, getTenantMembershipWithRole, getTenantBySlug } from '../../services/tenant.service';
 import { checkVerificationStatus } from '../../services/verification.service';
 import { signInWithPassword, getSession } from '../../services/supabase.service';
 import { signupWithOAuth } from '../../services/signup.service';
@@ -305,13 +305,20 @@ app.post('/signin', async (c) => {
         }
       }
 
-      // Create session record for session management
+      // Create session record for session management (tenant-scoped)
       // For OAuth implicit flow, generate a session token since we don't have the refresh token
       const deviceInfo = parseUserAgent(userAgent);
       const oauthSessionToken = crypto.randomBytes(32).toString('hex');
+      const oauthTenantSlug = c.req.header('X-Zygo-Tenant-Slug') || c.req.query('tenant_slug');
+      let oauthTenantId: string | undefined;
+      if (oauthTenantSlug) {
+        const oauthTenant = await getTenantBySlug(oauthTenantSlug);
+        if (oauthTenant) oauthTenantId = oauthTenant.id;
+      }
       await createSession({
         userId: user.id,
-        refreshToken: oauthSessionToken, // Use generated token for OAuth sessions
+        tenantId: oauthTenantId,
+        refreshToken: oauthSessionToken,
         deviceName: deviceInfo.deviceName,
         browser: deviceInfo.browser,
         os: deviceInfo.os,
@@ -542,11 +549,18 @@ app.post('/signin', async (c) => {
       })
       .where(eq(users.id, user.id));
 
-    // Create session record for session management
+    // Create session record for session management (tenant-scoped)
     const deviceInfoAuthCode = parseUserAgent(userAgent);
     const authCodeSessionToken = crypto.randomBytes(32).toString('hex');
+    const authCodeTenantSlug = c.req.header('X-Zygo-Tenant-Slug') || c.req.query('tenant_slug');
+    let authCodeTenantId: string | undefined;
+    if (authCodeTenantSlug) {
+      const authCodeTenant = await getTenantBySlug(authCodeTenantSlug);
+      if (authCodeTenant) authCodeTenantId = authCodeTenant.id;
+    }
     await createSession({
       userId: user.id,
+      tenantId: authCodeTenantId,
       refreshToken: authCodeSessionToken,
       deviceName: deviceInfoAuthCode.deviceName,
       browser: deviceInfoAuthCode.browser,

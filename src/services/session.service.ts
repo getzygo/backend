@@ -5,7 +5,7 @@
  */
 
 import crypto from 'crypto';
-import { eq, and, isNull, desc, lt } from 'drizzle-orm';
+import { eq, and, isNull, desc, lt, or, inArray } from 'drizzle-orm';
 import { getDb } from '../db/client';
 import { userSessions, auditLogs } from '../db/schema';
 import type { UserSession, NewUserSession } from '../db/schema/security';
@@ -114,10 +114,13 @@ export async function findSessionByToken(refreshToken: string): Promise<UserSess
 }
 
 /**
- * Get all active sessions for a user.
+ * Get all active sessions for a user, scoped to a specific tenant.
+ * Also includes legacy sessions (tenantId = null) so they remain visible
+ * until they expire naturally. New sessions are always created with tenantId.
  */
 export async function getUserSessions(
   userId: string,
+  tenantId: string,
   currentRefreshToken?: string
 ): Promise<SessionInfo[]> {
   const db = getDb();
@@ -126,6 +129,10 @@ export async function getUserSessions(
   const sessions = await db.query.userSessions.findMany({
     where: and(
       eq(userSessions.userId, userId),
+      or(
+        eq(userSessions.tenantId, tenantId),
+        isNull(userSessions.tenantId) // Include legacy sessions
+      ),
       isNull(userSessions.revokedAt)
     ),
     orderBy: desc(userSessions.lastActiveAt),
@@ -151,22 +158,27 @@ export async function getUserSessions(
 }
 
 /**
- * Revoke a specific session.
+ * Revoke a specific session, scoped to a specific tenant.
  * Returns the revoked session details for email notification, or null if not found.
  */
 export async function revokeSession(
   sessionId: string,
   userId: string,
+  tenantId: string,
   ipAddress?: string,
   userAgent?: string
 ): Promise<{ deviceName?: string | null; browser?: string | null; os?: string | null; locationCity?: string | null; locationCountry?: string | null } | null> {
   const db = getDb();
 
-  // Verify the session belongs to the user
+  // Verify the session belongs to the user AND tenant (or is a legacy null-tenant session)
   const session = await db.query.userSessions.findFirst({
     where: and(
       eq(userSessions.id, sessionId),
       eq(userSessions.userId, userId),
+      or(
+        eq(userSessions.tenantId, tenantId),
+        isNull(userSessions.tenantId)
+      ),
       isNull(userSessions.revokedAt)
     ),
   });
@@ -184,6 +196,7 @@ export async function revokeSession(
   // Audit log
   await db.insert(auditLogs).values({
     userId,
+    tenantId,
     action: 'session_revoked',
     resourceType: 'session',
     resourceId: sessionId,
@@ -208,10 +221,11 @@ export async function revokeSession(
 }
 
 /**
- * Revoke all sessions for a user except the current one.
+ * Revoke all sessions for a user in a specific tenant, except the current one.
  */
 export async function revokeAllSessions(
   userId: string,
+  tenantId: string,
   currentRefreshToken?: string,
   ipAddress?: string,
   userAgent?: string
@@ -219,10 +233,11 @@ export async function revokeAllSessions(
   const db = getDb();
   const currentTokenHash = currentRefreshToken ? hashToken(currentRefreshToken) : null;
 
-  // Get sessions to revoke (excluding current if provided)
+  // Get sessions to revoke, scoped to this tenant (excluding current if provided)
   const sessionsToRevoke = await db.query.userSessions.findMany({
     where: and(
       eq(userSessions.userId, userId),
+      eq(userSessions.tenantId, tenantId),
       isNull(userSessions.revokedAt)
     ),
   });
@@ -235,33 +250,18 @@ export async function revokeAllSessions(
     return 0;
   }
 
-  // Revoke all filtered sessions
-  const sessionIds = filteredSessions.map((s) => s.id);
-  await db
-    .update(userSessions)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(userSessions.userId, userId),
-        isNull(userSessions.revokedAt),
-        currentTokenHash
-          ? // Exclude current session if provided
-            eq(userSessions.tokenHash, currentTokenHash)
-          : undefined
-      )
-    );
-
-  // Actually, let's do it properly with the session IDs
-  for (const sessionId of sessionIds) {
+  // Revoke all filtered sessions by ID
+  for (const session of filteredSessions) {
     await db
       .update(userSessions)
       .set({ revokedAt: new Date() })
-      .where(eq(userSessions.id, sessionId));
+      .where(eq(userSessions.id, session.id));
   }
 
   // Audit log
   await db.insert(auditLogs).values({
     userId,
+    tenantId,
     action: 'sessions_revoked_all',
     resourceType: 'session',
     details: { count: filteredSessions.length, excluded_current: !!currentTokenHash },

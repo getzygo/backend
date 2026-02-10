@@ -242,11 +242,22 @@ app.post('/', rateLimit(RATE_LIMITS.SENSITIVE), zValidator('json', signinSchema)
     })
     .where(eq(users.id, user.id));
 
-  // Create session record for session management
+  // Resolve tenant for session scoping (from body param or header)
+  const sessionTenantSlug = body.tenant_slug || c.req.header('X-Zygo-Tenant-Slug');
+  let sessionTenantId: string | undefined;
+  if (sessionTenantSlug) {
+    const sessionTenant = await getTenantBySlug(sessionTenantSlug);
+    if (sessionTenant) {
+      sessionTenantId = sessionTenant.id;
+    }
+  }
+
+  // Create session record for session management (tenant-scoped)
   const deviceInfo = parseUserAgent(userAgent);
   const location = getLocationFromIP(ipAddress);
   await createSession({
     userId: user.id,
+    tenantId: sessionTenantId,
     refreshToken: authResult.session.refresh_token,
     deviceName: deviceInfo.deviceName,
     browser: deviceInfo.browser,

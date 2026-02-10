@@ -1,13 +1,17 @@
 /**
  * Session Management Routes
  *
- * GET /api/v1/auth/sessions - List active sessions
- * POST /api/v1/auth/sessions/:id/revoke - Revoke specific session
- * POST /api/v1/auth/sessions/revoke-all - Revoke all except current
+ * GET /api/v1/auth/sessions - List active sessions (tenant-scoped)
+ * POST /api/v1/auth/sessions/:id/revoke - Revoke specific session (tenant-scoped)
+ * POST /api/v1/auth/sessions/revoke-all - Revoke all except current (tenant-scoped)
+ *
+ * TENANT ISOLATION: All session operations are scoped to the current tenant.
+ * A user's sessions in Tenant A are completely isolated from Tenant B.
  */
 
 import { Hono } from 'hono';
 import { authMiddleware } from '../../middleware/auth.middleware';
+import { tenantMiddleware } from '../../middleware/tenant.middleware';
 import {
   getUserSessions,
   revokeSession,
@@ -16,24 +20,21 @@ import {
 import { notify } from '../../services/notification-hub.service';
 import { NOTIFICATION_CONFIGS, EMAIL_TEMPLATES } from '../../services/notification-configs';
 import { parseUserAgent } from '../../services/device-fingerprint.service';
-import { getDb } from '../../db/client';
-import { tenantMembers } from '../../db/schema';
-import { eq, and } from 'drizzle-orm';
 
 const app = new Hono();
 
 /**
  * GET /api/v1/auth/sessions
- * List all active sessions for the current user.
+ * List all active sessions for the current user in the current tenant.
  */
-app.get('/', authMiddleware, async (c) => {
+app.get('/', authMiddleware, tenantMiddleware, async (c) => {
   const user = c.get('user');
+  const tenantId = c.get('tenantId');
 
-  // Get refresh token from Authorization header or cookie to identify current session
-  // In practice, we'd extract this from the request context
-  const refreshToken = c.req.header('X-Refresh-Token'); // Optional header for identifying current session
+  // Get refresh token from header to identify current session
+  const refreshToken = c.req.header('X-Refresh-Token');
 
-  const sessions = await getUserSessions(user.id, refreshToken);
+  const sessions = await getUserSessions(user.id, tenantId, refreshToken);
 
   return c.json({
     sessions: sessions.map((session) => ({
@@ -55,17 +56,16 @@ app.get('/', authMiddleware, async (c) => {
 
 /**
  * POST /api/v1/auth/sessions/:id/revoke
- * Revoke a specific session.
- * Note: The revoked session's JWT will remain valid until it expires (typically 1 hour).
- * For immediate invalidation of all sessions, use revoke-all.
+ * Revoke a specific session within the current tenant.
  */
-app.post('/:id/revoke', authMiddleware, async (c) => {
+app.post('/:id/revoke', authMiddleware, tenantMiddleware, async (c) => {
   const user = c.get('user');
+  const tenantId = c.get('tenantId');
   const sessionId = c.req.param('id');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
 
-  const revokedSession = await revokeSession(sessionId, user.id, ipAddress, userAgent);
+  const revokedSession = await revokeSession(sessionId, user.id, tenantId, ipAddress, userAgent);
 
   if (!revokedSession) {
     return c.json(
@@ -83,22 +83,12 @@ app.post('/:id/revoke', authMiddleware, async (c) => {
     .filter(Boolean)
     .join(', ');
 
-  // Get user's primary tenant for in-app notification
-  const db = getDb();
-  const membership = await db.query.tenantMembers.findFirst({
-    where: and(
-      eq(tenantMembers.userId, user.id),
-      eq(tenantMembers.status, 'active')
-    ),
-    columns: { tenantId: true },
-  });
-
   // Fire and forget - don't block the response
   const config = NOTIFICATION_CONFIGS.session_revoked;
   const messageFunc = config.message as (details?: Record<string, unknown>) => string;
   notify({
     userId: user.id,
-    tenantId: membership?.tenantId,
+    tenantId,
     category: config.category,
     type: config.type,
     title: config.title,
@@ -118,10 +108,6 @@ app.post('/:id/revoke', authMiddleware, async (c) => {
     metadata: { revokedSessionId: sessionId },
   }).catch((err) => console.error('[Session] Notification failed:', err));
 
-  // Don't call signOutUser here - that would log out ALL sessions including the current one.
-  // The revoked session's JWT will expire naturally (typically 1 hour).
-  // This is the expected behavior for revoking a single session.
-
   return c.json({
     success: true,
     message: 'Session revoked successfully.',
@@ -130,11 +116,11 @@ app.post('/:id/revoke', authMiddleware, async (c) => {
 
 /**
  * POST /api/v1/auth/sessions/revoke-all
- * Revoke all sessions except the current one.
- * Note: Revoked sessions' JWTs will remain valid until they expire (typically 1 hour).
+ * Revoke all sessions except the current one, within the current tenant only.
  */
-app.post('/revoke-all', authMiddleware, async (c) => {
+app.post('/revoke-all', authMiddleware, tenantMiddleware, async (c) => {
   const user = c.get('user');
+  const tenantId = c.get('tenantId');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
 
@@ -143,13 +129,11 @@ app.post('/revoke-all', authMiddleware, async (c) => {
 
   const revokedCount = await revokeAllSessions(
     user.id,
+    tenantId,
     currentRefreshToken,
     ipAddress,
     userAgent
   );
-
-  // Don't call signOutUser here - that would log out the current session too.
-  // Revoked sessions' JWTs will expire naturally (typically 1 hour).
 
   return c.json({
     success: true,

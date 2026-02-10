@@ -28,7 +28,7 @@ import {
 } from '../../services/webauthn.service';
 import { getSupabaseAdmin } from '../../services/supabase.service';
 import { createAuthToken } from '../../services/auth-token.service';
-import { getUserTenants, getTenantMembershipWithRole } from '../../services/tenant.service';
+import { getUserTenants, getTenantMembershipWithRole, getTenantBySlug } from '../../services/tenant.service';
 import { parseUserAgent } from '../../services/device-fingerprint.service';
 import { createSession } from '../../services/session.service';
 import crypto from 'crypto';
@@ -188,11 +188,18 @@ app.post('/authenticate/verify', zValidator('json', authVerifySchema), async (c)
     })
     .where(eq(users.id, user.id));
 
-  // Create session record for session management
+  // Create session record for session management (tenant-scoped)
   const deviceInfo = parseUserAgent(userAgent);
   const passkeySessionToken = crypto.randomBytes(32).toString('hex');
+  const passkeyTenantSlug = c.req.header('X-Zygo-Tenant-Slug');
+  let passkeyTenantId: string | undefined;
+  if (passkeyTenantSlug) {
+    const passkeyTenant = await getTenantBySlug(passkeyTenantSlug);
+    if (passkeyTenant) passkeyTenantId = passkeyTenant.id;
+  }
   await createSession({
     userId: user.id,
+    tenantId: passkeyTenantId,
     refreshToken: passkeySessionToken,
     deviceName: deviceInfo.deviceName,
     browser: deviceInfo.browser,

@@ -138,7 +138,7 @@ const createGroupSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   initial_members: z.array(z.object({
     user_id: z.string().uuid(),
-    role: z.enum(['admin', 'member', 'viewer']).optional(),
+    role: z.enum(['owner', 'admin', 'member', 'viewer']).optional(),
   })).optional(),
 });
 
@@ -375,7 +375,7 @@ app.get('/:tenantId/groups/:groupId/members', async (c) => {
  */
 const addMemberSchema = z.object({
   user_id: z.string().uuid(),
-  role: z.enum(['admin', 'member', 'viewer']).optional(),
+  role: z.enum(['owner', 'admin', 'member', 'viewer']).optional(),
 });
 
 app.post('/:tenantId/groups/:groupId/members', zValidator('json', addMemberSchema), async (c) => {
