@@ -653,48 +653,79 @@ app.get('/me/activity', authMiddleware, async (c) => {
   const db = getDb();
   const offset = (page - 1) * limit;
 
-  // Allowed actions for activity log
+  // Allowed actions for activity log — security & operational events
+  // GDPR basis: Legitimate interest (Art. 6(1)(f)) for security incident investigation
+  // Only the user's own actions are returned (scoped by userId)
   const allowedActions = [
-    'login',
-    'logout',
-    'password_change',
-    'password_changed',
-    'mfa_enable',
-    'mfa_enabled',
-    'mfa_disable',
-    'mfa_disabled',
-    'profile_update',
-    'profile_updated',
-    'session_revoke',
-    'session_revoked',
-    'avatar_uploaded',
-    'passkey_register',
-    'passkey_remove',
-    'device_trust',
+    // Authentication
+    'login', 'login_oauth', 'login_failed', 'logout', 'signup',
+    'password_change', 'password_changed',
+    'password_reset_request', 'password_reset_complete',
     'suspicious_login',
+    // MFA
+    'mfa_enable', 'mfa_enabled', 'mfa_disable', 'mfa_disabled',
+    'mfa_backup_codes_regenerated',
+    // Sessions & devices
+    'session_revoke', 'session_revoked',
+    'passkey_register', 'passkey_remove', 'device_trust',
+    // OAuth
+    'oauth_link', 'oauth_unlink',
+    // Profile
+    'profile_update', 'profile_updated', 'avatar_uploaded', 'avatar_upload', 'avatar_delete',
+    // User management (actions this user performed)
+    'user_invite', 'user_role_change', 'user_delete',
+    // Tenant
+    'tenant_settings_update', 'tenant_security_update',
+    // Roles
+    'role_create', 'role_update', 'role_delete',
+    // Groups
+    'group_created', 'group_updated', 'group_archived', 'group_deleted',
+    'group_member_added', 'group_member_removed', 'group_member_role_updated',
+    'group_resource_assigned', 'group_resource_removed',
   ];
 
   // Build filter conditions
   const conditions = [eq(auditLogs.userId, user.id)];
 
-  // Filter by specific action if provided
-  if (actionFilter && allowedActions.includes(actionFilter)) {
-    // Map normalized actions to all variations
+  // Filter by specific action or category if provided
+  if (actionFilter && actionFilter !== 'all') {
+    // Map filter categories to all matching action strings
     const actionMap: Record<string, string[]> = {
-      login: ['login'],
+      // Auth category
+      login: ['login', 'login_oauth', 'login_failed', 'suspicious_login'],
       logout: ['logout'],
-      password_change: ['password_change', 'password_changed'],
+      signup: ['signup'],
+      password_change: ['password_change', 'password_changed', 'password_reset_request', 'password_reset_complete'],
+      // MFA category
       mfa_enable: ['mfa_enable', 'mfa_enabled'],
       mfa_disable: ['mfa_disable', 'mfa_disabled'],
-      profile_update: ['profile_update', 'profile_updated', 'avatar_uploaded'],
+      mfa: ['mfa_enable', 'mfa_enabled', 'mfa_disable', 'mfa_disabled', 'mfa_backup_codes_regenerated'],
+      // Sessions & devices
       session_revoke: ['session_revoke', 'session_revoked'],
       passkey_register: ['passkey_register'],
       passkey_remove: ['passkey_remove'],
       device_trust: ['device_trust'],
-      suspicious_login: ['suspicious_login'],
+      // OAuth
+      oauth: ['oauth_link', 'oauth_unlink'],
+      // Profile
+      profile_update: ['profile_update', 'profile_updated', 'avatar_uploaded', 'avatar_upload', 'avatar_delete'],
+      // User management
+      user_management: ['user_invite', 'user_role_change', 'user_delete'],
+      // Tenant settings
+      tenant_settings: ['tenant_settings_update', 'tenant_security_update'],
+      // Roles
+      role_management: ['role_create', 'role_update', 'role_delete'],
+      // Groups
+      groups: ['group_created', 'group_updated', 'group_archived', 'group_deleted',
+               'group_member_added', 'group_member_removed', 'group_member_role_updated',
+               'group_resource_assigned', 'group_resource_removed'],
     };
     const actionsToFilter = actionMap[actionFilter] || [actionFilter];
-    conditions.push(inArray(auditLogs.action, actionsToFilter));
+    // Only allow filtering by actions that are in our allowed list
+    const validActions = actionsToFilter.filter(a => allowedActions.includes(a));
+    if (validActions.length > 0) {
+      conditions.push(inArray(auditLogs.action, validActions));
+    }
   } else {
     // Default: show all allowed actions
     conditions.push(inArray(auditLogs.action, allowedActions));
@@ -718,13 +749,19 @@ app.get('/me/activity', authMiddleware, async (c) => {
 
   // Transform to API response format
   const transformedActivities = activities.map((log) => {
-    // Normalize action names for frontend
-    let normalizedAction = log.action;
-    if (log.action === 'password_changed') normalizedAction = 'password_change';
-    if (log.action === 'mfa_enabled') normalizedAction = 'mfa_enable';
-    if (log.action === 'mfa_disabled') normalizedAction = 'mfa_disable';
-    if (log.action === 'profile_updated' || log.action === 'avatar_uploaded') normalizedAction = 'profile_update';
-    if (log.action === 'session_revoked') normalizedAction = 'session_revoke';
+    // Normalize action name variations to canonical forms for frontend
+    const normalizeMap: Record<string, string> = {
+      'password_changed': 'password_change',
+      'mfa_enabled': 'mfa_enable',
+      'mfa_disabled': 'mfa_disable',
+      'profile_updated': 'profile_update',
+      'avatar_uploaded': 'profile_update',
+      'avatar_upload': 'profile_update',
+      'avatar_delete': 'profile_update',
+      'session_revoked': 'session_revoke',
+      'login_oauth': 'login',
+    };
+    const normalizedAction = normalizeMap[log.action] || log.action;
 
     // Extract device info from details
     const details = (log.details || {}) as Record<string, any>;
