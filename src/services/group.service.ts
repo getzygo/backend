@@ -551,22 +551,20 @@ export async function updateGroupMemberRole(params: {
     return { success: false, error: 'Member not found in group' };
   }
 
-  // Prevent demoting the last admin/owner — group must always have at least 1 admin
-  const isCurrentlyAdminOrOwner = existing[0].role === 'owner' || existing[0].role === 'admin';
-  const isNewRoleLower = newRole !== 'owner' && newRole !== 'admin';
-  if (isCurrentlyAdminOrOwner && isNewRoleLower) {
-    const adminOwnerCount = await db
+  // Prevent demoting the last owner — group must always have at least 1 owner
+  if (existing[0].role === 'owner' && newRole !== 'owner') {
+    const ownerCount = await db
       .select({ count: count() })
       .from(groupMembers)
       .where(
         and(
           eq(groupMembers.groupId, groupId),
-          sql`${groupMembers.role} IN ('owner', 'admin')`,
+          eq(groupMembers.role, 'owner'),
           eq(groupMembers.status, 'active')
         )
       );
-    if (Number(adminOwnerCount[0]?.count || 0) <= 1) {
-      return { success: false, error: 'Group must have at least one admin. Promote another member first.' };
+    if (Number(ownerCount[0]?.count || 0) <= 1) {
+      return { success: false, error: 'Group must have at least one owner. Transfer ownership first.' };
     }
   }
 
@@ -614,20 +612,20 @@ export async function removeGroupMember(params: {
     return { success: false, error: 'Member not found in group' };
   }
 
-  // Prevent removing if it would leave 0 admins/owners — group must always have at least 1 admin
-  if (existing[0].role === 'owner' || existing[0].role === 'admin') {
-    const adminOwnerCount = await db
+  // Prevent removing the last owner — group must always have at least 1 owner
+  if (existing[0].role === 'owner') {
+    const ownerCount = await db
       .select({ count: count() })
       .from(groupMembers)
       .where(
         and(
           eq(groupMembers.groupId, groupId),
-          sql`${groupMembers.role} IN ('owner', 'admin')`,
+          eq(groupMembers.role, 'owner'),
           eq(groupMembers.status, 'active')
         )
       );
-    if (Number(adminOwnerCount[0]?.count || 0) <= 1) {
-      return { success: false, error: 'Group must have at least one admin. Promote another member before leaving.' };
+    if (Number(ownerCount[0]?.count || 0) <= 1) {
+      return { success: false, error: 'Group must have at least one owner. Transfer ownership before leaving.' };
     }
   }
 
