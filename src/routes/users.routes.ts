@@ -635,41 +635,8 @@ app.get('/search', authMiddleware, optionalTenantMiddleware, async (c) => {
     });
   }
 
-  // Fallback: search all users (no tenant context)
-  const searchResults = await db.query.users.findMany({
-    where: (users, { and, or, ne, ilike }) =>
-      and(
-        ne(users.id, user.id), // Exclude current user
-        ne(users.status, 'deleted'), // Exclude deleted users
-        query
-          ? or(
-              ilike(users.firstName, `%${query}%`),
-              ilike(users.lastName, `%${query}%`),
-              ilike(users.email, `%${query}%`)
-            )
-          : undefined
-      ),
-    columns: {
-      id: true,
-      firstName: true,
-      lastName: true,
-      email: true,
-      avatarUrl: true,
-    },
-    limit,
-    orderBy: (users, { asc }) => [asc(users.firstName), asc(users.lastName)],
-  });
-
-  return c.json({
-    users: searchResults.map((u) => ({
-      id: u.id,
-      first_name: u.firstName,
-      last_name: u.lastName,
-      email: u.email,
-      has_avatar: !!u.avatarUrl,
-      job_title: null, // No tenant context, no job_title
-    })),
-  });
+  // No tenant context — refuse to search globally to prevent cross-tenant user enumeration
+  return c.json({ users: [] });
 });
 
 /**
