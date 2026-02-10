@@ -139,8 +139,9 @@ export async function canAddMember(tenantId: string): Promise<{
  */
 export async function getTenantMembers(
   tenantId: string,
-  statusFilter: 'active' | 'suspended' | 'all' = 'active'
-): Promise<(TenantMember & { user: User; role: Role })[]> {
+  statusFilter: 'active' | 'suspended' | 'all' = 'active',
+  pagination?: { page: number; perPage: number }
+): Promise<{ members: (TenantMember & { user: User; role: Role })[]; total: number }> {
   const db = getDb();
 
   // Build where conditions
@@ -155,6 +156,13 @@ export async function getTenantMembers(
     conditions.push(sql`${tenantMembers.status} != 'removed'`);
   }
 
+  // Get total count
+  const countResult = await db
+    .select({ count: count() })
+    .from(tenantMembers)
+    .where(and(...conditions));
+  const total = countResult[0]?.count ?? 0;
+
   const members = await db.query.tenantMembers.findMany({
     where: and(...conditions),
     with: {
@@ -162,13 +170,20 @@ export async function getTenantMembers(
       primaryRole: true,
     },
     orderBy: [tenantMembers.isOwner, tenantMembers.joinedAt],
+    ...(pagination && {
+      limit: pagination.perPage,
+      offset: (pagination.page - 1) * pagination.perPage,
+    }),
   });
 
-  return members.map((m) => ({
-    ...m,
-    user: m.user as User,
-    role: m.primaryRole as Role,
-  }));
+  return {
+    members: members.map((m) => ({
+      ...m,
+      user: m.user as User,
+      role: m.primaryRole as Role,
+    })),
+    total,
+  };
 }
 
 /**
@@ -467,28 +482,45 @@ export async function removeMember(params: {
 /**
  * Get all deleted (removed) members of a tenant
  */
-export async function getDeletedTenantMembers(tenantId: string): Promise<
-  (TenantMember & { user: User; role: Role })[]
-> {
+export async function getDeletedTenantMembers(
+  tenantId: string,
+  pagination?: { page: number; perPage: number }
+): Promise<{ members: (TenantMember & { user: User; role: Role })[]; total: number }> {
   const db = getDb();
 
+  const conditions = [
+    eq(tenantMembers.tenantId, tenantId),
+    eq(tenantMembers.status, 'removed'),
+  ];
+
+  // Get total count
+  const countResult = await db
+    .select({ count: count() })
+    .from(tenantMembers)
+    .where(and(...conditions));
+  const total = countResult[0]?.count ?? 0;
+
   const members = await db.query.tenantMembers.findMany({
-    where: and(
-      eq(tenantMembers.tenantId, tenantId),
-      eq(tenantMembers.status, 'removed')
-    ),
+    where: and(...conditions),
     with: {
       user: true,
       primaryRole: true,
     },
     orderBy: [tenantMembers.updatedAt],
+    ...(pagination && {
+      limit: pagination.perPage,
+      offset: (pagination.page - 1) * pagination.perPage,
+    }),
   });
 
-  return members.map((m) => ({
-    ...m,
-    user: m.user as User,
-    role: m.primaryRole as Role,
-  }));
+  return {
+    members: members.map((m) => ({
+      ...m,
+      user: m.user as User,
+      role: m.primaryRole as Role,
+    })),
+    total,
+  };
 }
 
 /**

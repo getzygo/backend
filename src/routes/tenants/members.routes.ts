@@ -101,8 +101,16 @@ app.get('/:tenantId/members', async (c) => {
     );
   }
 
+  // Parse optional pagination params (opt-in: omitting page returns all members)
+  const pageParam = c.req.query('page');
+  const perPageParam = c.req.query('per_page');
+  const page = pageParam ? Math.max(1, parseInt(pageParam, 10) || 1) : undefined;
+  const perPage = perPageParam ? Math.min(100, Math.max(1, parseInt(perPageParam, 10) || 20)) : undefined;
+  const pagination = page !== undefined ? { page, perPage: perPage || 20 } : undefined;
+
   // Fetch members based on status
   let members;
+  let total: number;
   if (status === 'deleted') {
     // For deleted members, need canDeleteUsers permission
     const canDelete = await hasPermission(user.id, tenantId, 'canDeleteUsers');
@@ -115,12 +123,18 @@ app.get('/:tenantId/members', async (c) => {
         403
       );
     }
-    members = await getDeletedTenantMembers(tenantId);
+    const result = await getDeletedTenantMembers(tenantId, pagination);
+    members = result.members;
+    total = result.total;
   } else {
     // Valid status values: 'active', 'suspended', 'all'
     const validStatus = status === 'all' ? 'all' : status === 'suspended' ? 'suspended' : 'active';
-    members = await getTenantMembers(tenantId, validStatus);
+    const result = await getTenantMembers(tenantId, validStatus, pagination);
+    members = result.members;
+    total = result.total;
   }
+
+  const effectivePerPage = pagination?.perPage || 20;
 
   return c.json({
     members: members.map((m) => ({
@@ -155,6 +169,12 @@ app.get('/:tenantId/members', async (c) => {
       retention_expires_at: m.retentionExpiresAt,
     })),
     count: members.length,
+    total,
+    ...(pagination && {
+      page: pagination.page,
+      per_page: effectivePerPage,
+      has_more: pagination.page * effectivePerPage < total,
+    }),
   });
 });
 
