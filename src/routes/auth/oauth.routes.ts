@@ -37,6 +37,7 @@ import { users, auditLogs } from '../../db/schema';
 import type { User } from '../../db/schema';
 import { createAuthToken } from '../../services/auth-token.service';
 import { parseUserAgent } from '../../services/device-fingerprint.service';
+import { getLocationFromIP } from '../../services/geolocation.service';
 import { createSession } from '../../services/session.service';
 import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
 import { isDeviceTrusted } from '../../services/trusted-device.service';
@@ -308,6 +309,7 @@ app.post('/signin', async (c) => {
       // Create session record for session management (tenant-scoped)
       // For OAuth implicit flow, generate a session token since we don't have the refresh token
       const deviceInfo = parseUserAgent(userAgent);
+      const oauthLocation = getLocationFromIP(ipAddress);
       const oauthSessionToken = crypto.randomBytes(32).toString('hex');
       const oauthTenantSlug = c.req.header('X-Zygo-Tenant-Slug') || c.req.query('tenant_slug');
       let oauthTenantId: string | undefined;
@@ -323,6 +325,8 @@ app.post('/signin', async (c) => {
         browser: deviceInfo.browser,
         os: deviceInfo.os,
         ipAddress: ipAddress || undefined,
+        locationCity: oauthLocation?.city,
+        locationCountry: oauthLocation?.country,
       });
 
       // Audit log
@@ -558,6 +562,7 @@ app.post('/signin', async (c) => {
       const authCodeTenant = await getTenantBySlug(authCodeTenantSlug);
       if (authCodeTenant) authCodeTenantId = authCodeTenant.id;
     }
+    const authCodeLocation = getLocationFromIP(ipAddress);
     await createSession({
       userId: user.id,
       tenantId: authCodeTenantId,
@@ -566,6 +571,8 @@ app.post('/signin', async (c) => {
       browser: deviceInfoAuthCode.browser,
       os: deviceInfoAuthCode.os,
       ipAddress: ipAddress || undefined,
+      locationCity: authCodeLocation?.city,
+      locationCountry: authCodeLocation?.country,
     });
 
     // Get user's tenants
@@ -1045,6 +1052,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       // Create session record for session management
       const existingUserDeviceInfo = parseUserAgent(userAgent);
       const existingUserSessionToken = crypto.randomBytes(32).toString('hex');
+      const existingUserLocation = getLocationFromIP(ipAddress);
       await createSession({
         userId: existingUser.id,
         tenantId: tenantResult.tenant.id,
@@ -1053,6 +1061,8 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
         browser: existingUserDeviceInfo.browser,
         os: existingUserDeviceInfo.os,
         ipAddress: ipAddress || undefined,
+        locationCity: existingUserLocation?.city,
+        locationCountry: existingUserLocation?.country,
       });
 
       // Generate secure opaque auth token stored in Redis
@@ -1161,6 +1171,7 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
     // Create session record for session management
     const signupDeviceInfo = parseUserAgent(userAgent);
     const signupSessionToken = crypto.randomBytes(32).toString('hex');
+    const signupLocation = getLocationFromIP(ipAddress);
     await createSession({
       userId: result.user.id,
       tenantId: result.tenant.id,
@@ -1169,6 +1180,8 @@ app.post('/complete-signup', zValidator('json', completeSignupSchema), async (c)
       browser: signupDeviceInfo.browser,
       os: signupDeviceInfo.os,
       ipAddress: ipAddress || undefined,
+      locationCity: signupLocation?.city,
+      locationCountry: signupLocation?.country,
     });
 
     // Generate secure opaque auth token stored in Redis

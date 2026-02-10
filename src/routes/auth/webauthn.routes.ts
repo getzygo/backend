@@ -31,6 +31,7 @@ import { createAuthToken } from '../../services/auth-token.service';
 import { getUserTenants, getTenantMembershipWithRole, getTenantBySlug } from '../../services/tenant.service';
 import { parseUserAgent } from '../../services/device-fingerprint.service';
 import { createSession } from '../../services/session.service';
+import { getLocationFromIP } from '../../services/geolocation.service';
 import crypto from 'crypto';
 
 const app = new Hono();
@@ -197,6 +198,7 @@ app.post('/authenticate/verify', zValidator('json', authVerifySchema), async (c)
     const passkeyTenant = await getTenantBySlug(passkeyTenantSlug);
     if (passkeyTenant) passkeyTenantId = passkeyTenant.id;
   }
+  const passkeyLocation = getLocationFromIP(ipAddress);
   await createSession({
     userId: user.id,
     tenantId: passkeyTenantId,
@@ -205,6 +207,8 @@ app.post('/authenticate/verify', zValidator('json', authVerifySchema), async (c)
     browser: deviceInfo.browser,
     os: deviceInfo.os,
     ipAddress: ipAddress || undefined,
+    locationCity: passkeyLocation?.city,
+    locationCountry: passkeyLocation?.country,
   });
 
   // Get user's tenants
