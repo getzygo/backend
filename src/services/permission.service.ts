@@ -180,6 +180,16 @@ export const ALL_PERMISSIONS: Array<{
   { key: 'canEditDocumentation', name: 'Edit Documentation', category: 'documentation', description: 'Edit documentation', requiresMfa: false, isCritical: false },
   { key: 'canPublishDocumentation', name: 'Publish Documentation', category: 'documentation', description: 'Publish documentation', requiresMfa: false, isCritical: false },
   { key: 'canManageDocVersions', name: 'Manage Doc Versions', category: 'documentation', description: 'Manage doc versions', requiresMfa: false, isCritical: false },
+
+  // 21. Groups & Teams (8)
+  { key: 'canViewGroups', name: 'View Groups', category: 'groups', description: 'View groups and teams', requiresMfa: false, isCritical: false },
+  { key: 'canCreateGroups', name: 'Create Groups', category: 'groups', description: 'Create new groups and teams', requiresMfa: false, isCritical: false },
+  { key: 'canManageGroups', name: 'Manage Groups', category: 'groups', description: 'Edit group settings and details', requiresMfa: false, isCritical: false },
+  { key: 'canDeleteGroups', name: 'Delete Groups', category: 'groups', description: 'Delete groups permanently', requiresMfa: false, isCritical: true },
+  { key: 'canManageGroupMembers', name: 'Manage Group Members', category: 'groups', description: 'Add and remove group members', requiresMfa: false, isCritical: false },
+  { key: 'canAssignGroupResources', name: 'Assign Group Resources', category: 'groups', description: 'Assign resources to groups', requiresMfa: false, isCritical: false },
+  { key: 'canViewGroupResources', name: 'View Group Resources', category: 'groups', description: 'View resources assigned to groups', requiresMfa: false, isCritical: false },
+  { key: 'canManageGroupSettings', name: 'Manage Group Settings', category: 'groups', description: 'Manage group configuration and settings', requiresMfa: false, isCritical: false },
 ];
 
 // All permission keys as a set for quick lookup

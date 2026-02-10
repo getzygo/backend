@@ -69,6 +69,17 @@ export const AUDIT_ACTIONS = {
   SECRET_UPDATE: 'secret_update',
   SECRET_DELETE: 'secret_delete',
   SECRET_ROTATE: 'secret_rotate',
+
+  // Groups
+  GROUP_CREATED: 'group_created',
+  GROUP_UPDATED: 'group_updated',
+  GROUP_ARCHIVED: 'group_archived',
+  GROUP_DELETED: 'group_deleted',
+  GROUP_MEMBER_ADDED: 'group_member_added',
+  GROUP_MEMBER_REMOVED: 'group_member_removed',
+  GROUP_MEMBER_ROLE_UPDATED: 'group_member_role_updated',
+  GROUP_RESOURCE_ASSIGNED: 'group_resource_assigned',
+  GROUP_RESOURCE_REMOVED: 'group_resource_removed',
 } as const;
 
 export type AuditAction = typeof AUDIT_ACTIONS[keyof typeof AUDIT_ACTIONS];

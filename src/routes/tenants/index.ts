@@ -49,6 +49,7 @@ import membersRoutes from './members.routes';
 import settingsRoutes from './settings.routes';
 import contactsRoutes from './contacts.routes';
 import verificationRoutes from './verification.routes';
+import groupsRoutes from './groups.routes';
 import {
   getUserTenants,
   getTenantById,
@@ -61,7 +62,7 @@ import {
   updateTenantBilling,
 } from '../../services/tenant.service';
 import { checkVerificationStatus } from '../../services/verification.service';
-import { hasPermission } from '../../services/permission.service';
+import { hasPermission, resolvePermissions } from '../../services/permission.service';
 import { getDb } from '../../db/client';
 import { auditLogs } from '../../db/schema';
 import type { User } from '../../db/schema';
@@ -769,6 +770,24 @@ app.patch(
   }
 );
 
+/**
+ * GET /api/v1/tenants/:tenantId/my-permissions
+ * Returns the current user's resolved permissions for this tenant.
+ * Used by the frontend to refresh permissions without re-login.
+ */
+app.get('/:tenantId/my-permissions', authMiddleware, async (c) => {
+  const user = c.get('user') as User;
+  const tenantId = c.req.param('tenantId');
+
+  const memberCheck = await isTenantMember(user.id, tenantId);
+  if (!memberCheck) {
+    return c.json({ error: 'forbidden', message: 'Not a tenant member' }, 403);
+  }
+
+  const permissions = await resolvePermissions(user.id, tenantId);
+  return c.json({ permissions });
+});
+
 // Mount SSO routes (Enterprise)
 app.route('/', ssoRoutes);
 
@@ -786,5 +805,8 @@ app.route('/', contactsRoutes);
 
 // Mount Verification routes (Email/Phone verification for tenant settings)
 app.route('/', verificationRoutes);
+
+// Mount Groups routes (Team collaboration)
+app.route('/', groupsRoutes);
 
 export default app;

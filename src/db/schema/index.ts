@@ -9,3 +9,4 @@ export * from './tenants';
 export * from './rbac';
 export * from './security';
 export * from './notifications';
+export * from './groups';
