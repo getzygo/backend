@@ -49,6 +49,13 @@ async function processJob(job: Job): Promise<void> {
         break;
       }
 
+      case JOB_TYPES.PROCESS_TRIAL_EXPIRATIONS: {
+        const { processExpiredTrials } = await import('../../services/trial-expiration.service');
+        const count = await processExpiredTrials();
+        console.log(`Trial expirations: ${count} downgraded`);
+        break;
+      }
+
       case JOB_TYPES.PROCESS_TENANT_DELETIONS: {
         const { processPendingTenantDeletions } = await import('../../services/tenant-deletion.service');
         const count = await processPendingTenantDeletions();

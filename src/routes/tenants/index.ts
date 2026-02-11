@@ -136,6 +136,10 @@ app.get('/:slugOrId/config', async (c) => {
         tier: tenant.plan,
         features: getPlanFeatures(tenant.plan),
       },
+      subscription: {
+        status: tenant.subscriptionStatus,
+        trialExpiresAt: tenant.trialExpiresAt?.toISOString() || null,
+      },
       branding: {
         logo: tenant.logoUrl || undefined,
         primaryColor: tenant.primaryColor || '#6366f1',

@@ -66,6 +66,20 @@ export async function setupReminderSchedules(): Promise<void> {
   );
   console.log('  - Trial reminders: daily at 9:30 AM UTC');
 
+  // Trial expirations - daily at 10:00 AM UTC (after reminders)
+  await queue.add(
+    JOB_TYPES.PROCESS_TRIAL_EXPIRATIONS,
+    { triggeredAt: new Date().toISOString() },
+    {
+      repeat: {
+        pattern: '0 10 * * *', // Cron: minute 0, hour 10, every day
+        tz: 'UTC',
+      },
+      jobId: 'trial-expirations-daily',
+    }
+  );
+  console.log('  - Trial expirations: daily at 10:00 AM UTC');
+
   // Tenant deletions - daily at 3:00 AM UTC (low traffic window)
   await queue.add(
     JOB_TYPES.PROCESS_TENANT_DELETIONS,
@@ -87,7 +101,7 @@ export async function setupReminderSchedules(): Promise<void> {
  * Manually trigger a reminder process (for testing)
  */
 export async function triggerReminderProcess(
-  type: 'mfa' | 'phone' | 'trial' | 'tenant_deletion'
+  type: 'mfa' | 'phone' | 'trial' | 'trial_expiration' | 'tenant_deletion'
 ): Promise<string> {
   const queue = getReminderQueue();
 
@@ -95,6 +109,7 @@ export async function triggerReminderProcess(
     mfa: JOB_TYPES.PROCESS_MFA_REMINDERS,
     phone: JOB_TYPES.PROCESS_PHONE_REMINDERS,
     trial: JOB_TYPES.PROCESS_TRIAL_REMINDERS,
+    trial_expiration: JOB_TYPES.PROCESS_TRIAL_EXPIRATIONS,
     tenant_deletion: JOB_TYPES.PROCESS_TENANT_DELETIONS,
   };
 

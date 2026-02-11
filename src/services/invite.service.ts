@@ -79,6 +79,23 @@ export async function createInvite(params: {
     };
   }
 
+  // Validate subscription status
+  const tenantSub = await db.query.tenants.findFirst({
+    where: eq(tenants.id, tenantId),
+    columns: { plan: true, subscriptionStatus: true, trialExpiresAt: true },
+  });
+
+  if (tenantSub && tenantSub.plan !== 'core') {
+    const validStatuses = ['active', 'trialing'];
+    if (!validStatuses.includes(tenantSub.subscriptionStatus || '')) {
+      return { success: false, error: 'Your subscription is not active. Please update your billing to invite members.' };
+    }
+
+    if (tenantSub.subscriptionStatus === 'trialing' && tenantSub.trialExpiresAt && tenantSub.trialExpiresAt <= new Date()) {
+      return { success: false, error: 'Your trial has expired. Please upgrade to invite members.' };
+    }
+  }
+
   // Check if invite already exists for this email
   const existingInvite = await db.query.tenantInvites.findFirst({
     where: and(
@@ -549,6 +566,23 @@ export async function acceptInvite(params: {
       success: false,
       error: canAdd.reason || 'Cannot add member due to plan limits.',
     };
+  }
+
+  // Validate subscription status
+  const inviteTenant = await db.query.tenants.findFirst({
+    where: eq(tenants.id, invite.tenantId),
+    columns: { plan: true, subscriptionStatus: true, trialExpiresAt: true },
+  });
+
+  if (inviteTenant && inviteTenant.plan !== 'core') {
+    const validStatuses = ['active', 'trialing'];
+    if (!validStatuses.includes(inviteTenant.subscriptionStatus || '')) {
+      return { success: false, error: 'This workspace\'s subscription is not active. The invite cannot be accepted.' };
+    }
+
+    if (inviteTenant.subscriptionStatus === 'trialing' && inviteTenant.trialExpiresAt && inviteTenant.trialExpiresAt <= new Date()) {
+      return { success: false, error: 'This workspace\'s trial has expired. The invite cannot be accepted.' };
+    }
   }
 
   // Check if already a member
