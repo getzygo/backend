@@ -84,6 +84,9 @@ export const REDIS_KEYS = {
 
   /** Auth token for cross-domain redirect: auth_token:{token} */
   AUTH_TOKEN: 'auth_token:',
+
+  /** PIN attempt tracking: pin_attempts:{userId}:{sessionId} */
+  PIN_ATTEMPTS: 'pin_attempts:',
 } as const;
 
 /**
@@ -125,4 +128,7 @@ export const REDIS_TTL = {
 
   /** Auth token for cross-domain redirect: 2 minutes */
   AUTH_TOKEN: 2 * 60,
+
+  /** PIN attempt lockout window: 15 minutes */
+  PIN_ATTEMPTS: 15 * 60,
 } as const;

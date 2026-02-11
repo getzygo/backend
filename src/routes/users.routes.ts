@@ -30,6 +30,9 @@ import {
 
 const app = new Hono();
 
+// Track already-warned avatar path mismatches to avoid log spam
+const warnedAvatarPaths = new Set<string>();
+
 // Update profile schema (authenticated)
 // Note: avatar_url is not accepted here - use POST /users/me/avatar instead
 const updateProfileSchema = z.object({
@@ -166,8 +169,12 @@ app.get('/me/avatar/file', authMiddleware, tenantMiddleware, requireTenantMember
   // Validate tenant ownership of the avatar
   if (!validateAvatarPathTenant(storagePath, tenantId)) {
     // Avatar exists but belongs to a different tenant context
-    // This can happen with legacy avatars - serve them but log a warning
-    console.warn(`[Users] Avatar path ${storagePath} does not match tenant ${tenantId} for user ${user.id}`);
+    // This can happen with legacy avatars - serve them but log once
+    const warnKey = `${storagePath}:${tenantId}`;
+    if (!warnedAvatarPaths.has(warnKey)) {
+      warnedAvatarPaths.add(warnKey);
+      console.warn(`[Users] Avatar path ${storagePath} does not match tenant ${tenantId} for user ${user.id} (logging once)`);
+    }
   }
 
   // Get the actual file
@@ -835,8 +842,11 @@ app.get('/:userId/avatar/file', authMiddleware, tenantMiddleware, requireTenantM
 
   // Validate tenant ownership of the avatar
   if (!validateAvatarPathTenant(storagePath, tenantId)) {
-    // Avatar exists but belongs to a different tenant context
-    console.warn(`[Users] Avatar path ${storagePath} does not match tenant ${tenantId} for user ${requestedUserId}`);
+    const warnKey = `${storagePath}:${tenantId}`;
+    if (!warnedAvatarPaths.has(warnKey)) {
+      warnedAvatarPaths.add(warnKey);
+      console.warn(`[Users] Avatar path ${storagePath} does not match tenant ${tenantId} for user ${requestedUserId} (logging once)`);
+    }
   }
 
   // Get the actual file

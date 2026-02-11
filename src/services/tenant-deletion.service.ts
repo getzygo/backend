@@ -423,12 +423,33 @@ export async function getTenantMemberEmails(tenantId: string): Promise<
   return members;
 }
 
+/**
+ * Process all tenants ready for deletion
+ * Called by the daily scheduled worker
+ */
+export async function processPendingTenantDeletions(): Promise<number> {
+  const tenants = await getTenantsReadyForDeletion();
+  let count = 0;
+  for (const tenant of tenants) {
+    try {
+      await executeTenantDeletion(tenant.id);
+      count++;
+      console.log(`[TenantDeletion] Executed deletion for tenant ${tenant.id} (${tenant.name})`);
+    } catch (error) {
+      console.error(`[TenantDeletion] Failed to delete tenant ${tenant.id}:`, error);
+      // Continue with next tenant — one failure shouldn't block others
+    }
+  }
+  return count;
+}
+
 export const tenantDeletionService = {
   requestTenantDeletion,
   cancelTenantDeletion,
   getDeletionStatus,
   executeTenantDeletion,
   getTenantsReadyForDeletion,
+  processPendingTenantDeletions,
   getTenantMemberEmails,
   GRACE_PERIOD_DAYS,
   CANCELLATION_WINDOW_DAYS,

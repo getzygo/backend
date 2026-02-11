@@ -170,6 +170,14 @@ export const tenantSecurityConfig = pgTable(
     passwordRequireSymbols: boolean('password_require_symbols').default(true),
     passwordExpiryDays: integer('password_expiry_days'), // null = no expiry
 
+    // Idle lock & PIN policy
+    idleLockEnabled: boolean('idle_lock_enabled').notNull().default(false),
+    idleLockTimeoutMinutes: integer('idle_lock_timeout_minutes').notNull().default(15),
+    pinLengthRequirement: integer('pin_length_requirement').notNull().default(4), // 4 or 6
+    requirePin: boolean('require_pin').notNull().default(false),
+    pinDeadlineDays: integer('pin_deadline_days').notNull().default(7),
+    pinMaxAttempts: integer('pin_max_attempts').notNull().default(5),
+
     // IP restrictions
     ipWhitelist: jsonb('ip_whitelist').default([]),
     // Array of IP addresses/CIDR ranges

@@ -10,6 +10,7 @@ import {
   varchar,
   text,
   boolean,
+  integer,
   timestamp,
   jsonb,
   index,
@@ -61,6 +62,12 @@ export const users = pgTable(
     mfaEnabled: boolean('mfa_enabled').notNull().default(false),
     mfaSecret: text('mfa_secret'),
     mfaBackupCodes: jsonb('mfa_backup_codes'),
+
+    // PIN (idle lock)
+    pinHash: text('pin_hash'),
+    pinEnabled: boolean('pin_enabled').notNull().default(false),
+    pinLength: integer('pin_length'), // 4 or 6
+    pinChangedAt: timestamp('pin_changed_at', { withTimezone: true }),
 
     // Terms acceptance
     termsAcceptedAt: timestamp('terms_accepted_at', { withTimezone: true }),

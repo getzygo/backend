@@ -466,6 +466,12 @@ app.get('/:tenantId/security-config', async (c) => {
     ip_whitelist: config.ipWhitelist,
     sso_enabled: config.ssoEnabled,
     sso_provider: config.ssoProvider,
+    idle_lock_enabled: config.idleLockEnabled,
+    idle_lock_timeout_minutes: config.idleLockTimeoutMinutes,
+    pin_length_requirement: config.pinLengthRequirement,
+    require_pin: config.requirePin,
+    pin_deadline_days: config.pinDeadlineDays,
+    pin_max_attempts: config.pinMaxAttempts,
     updated_at: config.updatedAt,
   });
 });
@@ -484,6 +490,16 @@ const updateSecurityConfigSchema = z.object({
   password_require_numbers: z.boolean().optional(),
   password_require_symbols: z.boolean().optional(),
   password_expiry_days: z.number().int().min(0).max(365).nullable().optional(), // 0 or null = no expiry
+  idle_lock_enabled: z.boolean().optional(),
+  idle_lock_timeout_minutes: z.number().int().refine((v) => [5, 10, 15, 30, 60].includes(v), {
+    message: 'Must be 5, 10, 15, 30, or 60',
+  }).optional(),
+  pin_length_requirement: z.number().int().refine((v) => [4, 6].includes(v), {
+    message: 'Must be 4 or 6',
+  }).optional(),
+  require_pin: z.boolean().optional(),
+  pin_deadline_days: z.number().int().min(1).max(90).optional(),
+  pin_max_attempts: z.number().int().min(3).max(10).optional(),
 });
 
 /**
@@ -550,6 +566,24 @@ app.patch(
     if (updates.max_concurrent_sessions !== undefined) {
       serviceUpdates.maxConcurrentSessions = updates.max_concurrent_sessions;
     }
+    if (updates.idle_lock_enabled !== undefined) {
+      serviceUpdates.idleLockEnabled = updates.idle_lock_enabled;
+    }
+    if (updates.idle_lock_timeout_minutes !== undefined) {
+      serviceUpdates.idleLockTimeoutMinutes = updates.idle_lock_timeout_minutes;
+    }
+    if (updates.pin_length_requirement !== undefined) {
+      serviceUpdates.pinLengthRequirement = updates.pin_length_requirement;
+    }
+    if (updates.require_pin !== undefined) {
+      serviceUpdates.requirePin = updates.require_pin;
+    }
+    if (updates.pin_deadline_days !== undefined) {
+      serviceUpdates.pinDeadlineDays = updates.pin_deadline_days;
+    }
+    if (updates.pin_max_attempts !== undefined) {
+      serviceUpdates.pinMaxAttempts = updates.pin_max_attempts;
+    }
 
     // Update the config
     const updatedConfig = await updateTenantSecurityConfig(tenantId, serviceUpdates);
@@ -595,6 +629,12 @@ app.patch(
       ip_whitelist: updatedConfig.ipWhitelist,
       sso_enabled: updatedConfig.ssoEnabled,
       sso_provider: updatedConfig.ssoProvider,
+      idle_lock_enabled: updatedConfig.idleLockEnabled,
+      idle_lock_timeout_minutes: updatedConfig.idleLockTimeoutMinutes,
+      pin_length_requirement: updatedConfig.pinLengthRequirement,
+      require_pin: updatedConfig.requirePin,
+      pin_deadline_days: updatedConfig.pinDeadlineDays,
+      pin_max_attempts: updatedConfig.pinMaxAttempts,
       updated_at: updatedConfig.updatedAt,
     });
   }

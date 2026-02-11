@@ -49,6 +49,13 @@ async function processJob(job: Job): Promise<void> {
         break;
       }
 
+      case JOB_TYPES.PROCESS_TENANT_DELETIONS: {
+        const { processPendingTenantDeletions } = await import('../../services/tenant-deletion.service');
+        const count = await processPendingTenantDeletions();
+        console.log(`Tenant deletions processed: ${count} executed`);
+        break;
+      }
+
       case JOB_TYPES.SEND_REMINDER: {
         const payload = job.data as SendReminderPayload;
         await sendReminder(payload);

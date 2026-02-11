@@ -22,6 +22,7 @@ import trustedDevicesRoutes from './trusted-devices.routes';
 import magicLinkRoutes from './magic-link.routes';
 import webauthnRoutes from './webauthn.routes';
 import passwordSecurityRoutes from './password-security.routes';
+import pinRoutes from './pin.routes';
 
 const app = new Hono();
 
@@ -127,5 +128,13 @@ app.route('/webauthn', webauthnRoutes);
 // Password security routes
 // POST /api/v1/auth/password/check-breach
 app.route('/password', passwordSecurityRoutes);
+
+// PIN routes (idle lock)
+// POST /api/v1/auth/pin/setup
+// POST /api/v1/auth/pin/verify
+// POST /api/v1/auth/pin/change
+// DELETE /api/v1/auth/pin
+// GET /api/v1/auth/pin/status
+app.route('/pin', pinRoutes);
 
 export default app;

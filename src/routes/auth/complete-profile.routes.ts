@@ -114,6 +114,8 @@ const profileHandler = async (c: any) => {
       email_verified_via: user.emailVerifiedVia, // 'email', 'google', 'github', or null
       phone_verified: user.phoneVerified,
       mfa_enabled: user.mfaEnabled,
+      pin_enabled: user.pinEnabled,
+      pin_length: user.pinLength,
       status: user.status,
       created_at: user.createdAt,
       last_login_at: user.lastLoginAt,

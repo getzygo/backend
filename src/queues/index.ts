@@ -23,6 +23,9 @@ export const JOB_TYPES = {
   PROCESS_PHONE_REMINDERS: 'process_phone_reminders',
   PROCESS_TRIAL_REMINDERS: 'process_trial_reminders',
 
+  // Tenant deletion (scheduled daily)
+  PROCESS_TENANT_DELETIONS: 'process_tenant_deletions',
+
   // Individual reminder job (queued by batch processors)
   SEND_REMINDER: 'send_reminder',
 } as const;

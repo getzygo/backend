@@ -427,6 +427,12 @@ export async function updateTenantSecurityConfig(
       | 'mfaDeadlineDays'
       | 'sessionTimeoutMinutes'
       | 'maxConcurrentSessions'
+      | 'idleLockEnabled'
+      | 'idleLockTimeoutMinutes'
+      | 'pinLengthRequirement'
+      | 'requirePin'
+      | 'pinDeadlineDays'
+      | 'pinMaxAttempts'
     >
   >
 ): Promise<TenantSecurityConfig | null> {
