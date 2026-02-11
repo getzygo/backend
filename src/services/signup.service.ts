@@ -131,21 +131,11 @@ function getTenantType(plan: PlanType): 'personal' | 'organization' {
 }
 
 /**
- * Get default license count based on plan
+ * Get default license count for new tenants.
+ * Always starts at 1 (the owner). Users purchase additional seats explicitly.
  */
-function getDefaultLicenseCount(plan: PlanType): number {
-  switch (plan) {
-    case 'core':
-      return 1; // Core is single user
-    case 'flow':
-      return 5;
-    case 'scale':
-      return 10;
-    case 'enterprise':
-      return 50;
-    default:
-      return 1;
-  }
+function getDefaultLicenseCount(_plan: PlanType): number {
+  return 1;
 }
 
 /**

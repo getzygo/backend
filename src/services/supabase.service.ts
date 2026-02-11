@@ -150,11 +150,15 @@ export async function getSession(accessToken: string): Promise<{
     const secret = new TextEncoder().encode(env.SUPABASE_JWT_SECRET);
 
     // Verify the JWT signature and claims
+    // Accept both localhost and proxy URL issuers
+    // (GoTrue signs tokens with API_EXTERNAL_URL which is now the proxy)
+    const issuers = [
+      env.SUPABASE_URL + '/auth/v1',           // http://localhost:8000/auth/v1
+      'https://api.zygo.tech/supabase/auth/v1', // proxy URL (current GoTrue config)
+    ];
     const { payload } = await jwtVerify(accessToken, secret, {
       algorithms: ['HS256'],
-      // Verify issuer matches our Supabase instance
-      issuer: env.SUPABASE_URL + '/auth/v1',
-      // Verify audience is 'authenticated'
+      issuer: issuers,
       audience: 'authenticated',
     });
 

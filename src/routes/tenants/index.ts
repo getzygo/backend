@@ -139,6 +139,7 @@ app.get('/:slugOrId/config', async (c) => {
       subscription: {
         status: tenant.subscriptionStatus,
         trialExpiresAt: tenant.trialExpiresAt?.toISOString() || null,
+        licenseCount: tenant.licenseCount || 1,
       },
       branding: {
         logo: tenant.logoUrl || undefined,

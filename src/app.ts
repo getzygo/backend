@@ -10,6 +10,7 @@ import { logger as honoLogger } from 'hono/logger';
 import { prettyJSON } from 'hono/pretty-json';
 import { secureHeaders } from 'hono/secure-headers';
 import routes from './routes';
+import supabaseProxy from './routes/supabase-proxy.routes';
 import { getEnv } from './config/env';
 import { logger } from './utils/logger';
 
@@ -21,10 +22,12 @@ export function createApp() {
   app.use('*', prettyJSON());
   app.use('*', secureHeaders());
 
-  // Add version header to all responses
+  // Version header — only in non-production for debugging
   app.use('*', async (c, next) => {
     await next();
-    c.res.headers.set('X-Zygo-Api-Version', '2026-01-31-v2');
+    if (process.env.NODE_ENV !== 'production') {
+      c.res.headers.set('X-Zygo-Api-Version', '2026-01-31-v2');
+    }
   });
 
   // CORS configuration
@@ -66,7 +69,7 @@ export function createApp() {
         return null;
       },
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Zygo-Mode', 'X-Zygo-Tenant-Slug'],
+      allowHeaders: ['Content-Type', 'Authorization', 'X-Request-ID', 'X-Zygo-Mode', 'X-Zygo-Tenant-Slug', 'apikey'],
       exposeHeaders: ['X-Request-ID'],
       credentials: true,
       maxAge: 86400,
@@ -86,27 +89,20 @@ export function createApp() {
     );
   });
 
-  // 404 handler
+  // 404 handler — generic message (don't leak method/path)
   app.notFound((c) => {
-    return c.json(
-      {
-        error: 'not_found',
-        message: `Route ${c.req.method} ${c.req.path} not found`,
-      },
-      404
-    );
+    return c.json({ error: 'not_found' }, 404);
   });
+
+  // Mount Supabase auth proxy (outside /api/v1 so SDK paths match)
+  app.route('/supabase', supabaseProxy);
 
   // Mount API routes under /api/v1
   app.route('/api/v1', routes);
 
-  // Root endpoint
+  // Root endpoint — no info disclosure
   app.get('/', (c) => {
-    return c.json({
-      name: 'Zygo API',
-      version: '1.0.0',
-      docs: '/api/v1/docs',
-    });
+    return c.json({ status: 'ok' });
   });
 
   return app;

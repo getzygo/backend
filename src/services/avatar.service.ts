@@ -33,7 +33,7 @@ export function isExternalAvatarUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   const env = getEnv();
   // External if not from our Supabase storage
-  return !url.includes(env.SUPABASE_URL!) && !url.includes('db.zygo.tech');
+  return !url.includes(env.SUPABASE_URL!) && !url.includes('localhost:8000');
 }
 
 /**

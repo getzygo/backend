@@ -136,7 +136,7 @@ app.post(
           attempts_remaining: result.attemptsRemaining,
           locked_out: result.lockedOut,
         },
-        result.lockedOut ? 423 : 401
+        result.lockedOut ? 423 : 403
       );
     }
 
