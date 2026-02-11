@@ -1162,7 +1162,7 @@ app.post(
         severity: config.severity,
         actionRoute: config.actionRoute,
         actionLabel: config.actionLabel,
-        emailTemplate: EMAIL_TEMPLATES.tenantDeletionRequested({
+        rawEmailHtml: EMAIL_TEMPLATES.tenantDeletionRequested({
           firstName: member.firstName || undefined,
           tenantName: tenant.name,
           deletionScheduledAt: result.deletionScheduledAt!,
@@ -1303,7 +1303,7 @@ app.delete('/:tenantId/settings/deletion', async (c) => {
       severity: cancelConfig.severity,
       actionRoute: cancelConfig.actionRoute,
       actionLabel: cancelConfig.actionLabel,
-      emailTemplate: EMAIL_TEMPLATES.tenantDeletionCancelled({
+      rawEmailHtml: EMAIL_TEMPLATES.tenantDeletionCancelled({
         firstName: member.firstName || undefined,
         tenantName: tenant.name,
         cancelledBy,

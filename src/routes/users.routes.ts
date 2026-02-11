@@ -134,6 +134,8 @@ app.get('/me', authMiddleware, optionalTenantMiddleware, async (c) => {
     phone_country_code: user.phoneCountryCode,
     phone_verified: user.phoneVerified,
     mfa_enabled: user.mfaEnabled,
+    pin_enabled: user.pinEnabled,
+    pin_length: user.pinLength,
     // Password status (for OAuth-only users who can't change password)
     has_password: !!user.passwordHash,
     // Address fields
@@ -504,6 +506,8 @@ app.patch('/me', authMiddleware, optionalTenantMiddleware, zValidator('json', up
     phone_country_code: updatedUser.phoneCountryCode,
     phone_verified: updatedUser.phoneVerified,
     mfa_enabled: updatedUser.mfaEnabled,
+    pin_enabled: updatedUser.pinEnabled,
+    pin_length: updatedUser.pinLength,
     // Address fields
     address_line_1: updatedUser.addressLine1,
     address_line_2: updatedUser.addressLine2,

@@ -42,6 +42,7 @@ interface NotifyOptions {
 
   // Email (optional - if not provided, in-app only)
   emailTemplate?: ReactElement;
+  rawEmailHtml?: string; // Pre-rendered HTML (preferred over emailTemplate for Gmail compatibility)
   emailSubject?: string;
 
   // Metadata
@@ -100,13 +101,13 @@ export async function notify(options: NotifyOptions): Promise<NotifyResult> {
     shouldSendInApp = true;
   }
 
-  // 1. Send email if enabled and template provided
-  if (shouldSendEmail && options.emailTemplate && options.emailSubject) {
+  // 1. Send email if enabled and template/html provided
+  if (shouldSendEmail && (options.emailTemplate || options.rawEmailHtml) && options.emailSubject) {
     try {
       const emailResult = await sendEmail({
         to: user.email,
         subject: options.emailSubject,
-        template: options.emailTemplate,
+        ...(options.rawEmailHtml ? { rawHtml: options.rawEmailHtml } : { template: options.emailTemplate }),
       });
       result.emailSent = emailResult.sent;
       result.emailError = emailResult.error;
