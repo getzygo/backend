@@ -921,7 +921,7 @@ export async function sendTenantDeletionRequestedEmail(
   return sendEmail({
     to: email,
     subject: `Workspace deletion scheduled - ${options.tenantName || 'Zygo'}`,
-    template: TenantDeletionRequested({
+    rawHtml: TenantDeletionRequested({
       firstName: options.firstName,
       tenantName: options.tenantName,
       deletionScheduledAt: options.deletionScheduledAt,
@@ -955,7 +955,7 @@ export async function sendTenantDeletionCancelledEmail(
   return sendEmail({
     to: email,
     subject: `Workspace deletion cancelled - ${options.tenantName || 'Zygo'}`,
-    template: TenantDeletionCancelled({
+    rawHtml: TenantDeletionCancelled({
       firstName: options.firstName,
       tenantName: options.tenantName,
       cancelledBy: options.cancelledBy,

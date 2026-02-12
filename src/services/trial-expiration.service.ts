@@ -89,8 +89,8 @@ export async function processExpiredTrials(): Promise<number> {
           title: 'Trial expired — downgraded to Core',
           message: `Your free trial for ${tenant.tenantName} has ended. You've been moved to the Core plan. Upgrade anytime to restore team features.`,
           type: 'system',
-          category: 'billing',
-          priority: 'high',
+          category: 'trial_expiration_final',
+          severity: 'warning',
         });
       } catch (notifErr) {
         console.error(`Failed to create notification for tenant ${tenant.tenantId}:`, notifErr);

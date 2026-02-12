@@ -116,8 +116,7 @@ supabaseProxy.all('/auth/v1/*', async (c) => {
       method: c.req.method,
       headers: forwardHeaders,
       body: hasBody ? c.req.raw.body : undefined,
-      // @ts-expect-error duplex required by Node for streaming body
-      ...(hasBody ? { duplex: 'half' } : {}),
+      ...(hasBody ? { duplex: 'half' as const } : {}),
       redirect: 'manual',
     });
 
