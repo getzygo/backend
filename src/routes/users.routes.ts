@@ -3,7 +3,7 @@
  *
  * GET /api/v1/users/me - Get current user's profile
  * PATCH /api/v1/users/me - Update current user's profile (authenticated)
- * PATCH /api/v1/users/me/public - Update profile during onboarding (email-based)
+ * PATCH /api/v1/users/me/public - Update profile during onboarding (authenticated)
  * GET /api/v1/users/me/avatar/file - Get avatar file (private, tenant-scoped)
  * POST /api/v1/users/me/avatar - Upload avatar (tenant-scoped)
  * GET /api/v1/users/:userId/avatar/file - Get any user's avatar (tenant-scoped)
@@ -54,9 +54,8 @@ const updateProfileSchema = z.object({
   postal_code: z.string().max(20).optional().nullable(),
 });
 
-// Update profile schema (public - during onboarding)
+// Update profile schema (onboarding - name only)
 const updateProfilePublicSchema = z.object({
-  email: z.string().email('Invalid email address'),
   first_name: z.string().min(1, 'First name is required').max(100),
   last_name: z.string().min(1, 'Last name is required').max(100),
 });
@@ -522,32 +521,16 @@ app.patch('/me', authMiddleware, optionalTenantMiddleware, zValidator('json', up
 
 /**
  * PATCH /api/v1/users/me/public
- * Update user profile during onboarding (no auth required)
- * Uses email as identifier - intended for use right after signup
- * when user doesn't have a session yet.
+ * Update user profile during onboarding
+ * Requires auth — signup sets HTTPOnly cookies before this step.
  */
-app.patch('/me/public', zValidator('json', updateProfilePublicSchema), async (c) => {
+app.patch('/me/public', authMiddleware, zValidator('json', updateProfilePublicSchema), async (c) => {
+  const user = c.get('user');
   const body = c.req.valid('json');
   const ipAddress = c.req.header('x-forwarded-for') || c.req.header('x-real-ip');
   const userAgent = c.req.header('user-agent');
 
-  const normalizedEmail = body.email.toLowerCase().trim();
-
-  // Find the user by email
   const db = getDb();
-  const user = await db.query.users.findFirst({
-    where: eq(users.email, normalizedEmail),
-  });
-
-  if (!user) {
-    return c.json(
-      {
-        error: 'user_not_found',
-        message: 'No account found with this email',
-      },
-      404
-    );
-  }
 
   // Update user profile
   const [updatedUser] = await db
