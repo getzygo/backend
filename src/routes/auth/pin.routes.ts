@@ -17,6 +17,8 @@ import { getDb } from '../../db/client';
 import { auditLogs, tenantMembers, tenantSecurityConfig } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { rateLimit, RATE_LIMITS } from '../../middleware/rate-limit.middleware';
+import { signInWithPassword } from '../../services/supabase.service';
+import { setAuthCookies } from '../../utils/cookies';
 
 const app = new Hono();
 
@@ -262,5 +264,48 @@ app.get('/status', authMiddleware, async (c) => {
     length: status.length,
   });
 });
+
+/**
+ * POST /api/v1/auth/pin/unlock
+ * Lock screen password unlock — verifies password and refreshes HTTPOnly cookies.
+ * Does NOT require authMiddleware (session may be expired).
+ */
+app.post(
+  '/unlock',
+  rateLimit(RATE_LIMITS.SENSITIVE),
+  zValidator(
+    'json',
+    z.object({
+      email: z.string().email(),
+      password: z.string().min(1),
+    })
+  ),
+  async (c) => {
+    const { email, password } = c.req.valid('json');
+
+    const result = await signInWithPassword(email, password);
+
+    if (result.error || !result.session) {
+      return c.json(
+        { error: 'invalid_credentials', message: 'Incorrect password. Please try again.' },
+        401
+      );
+    }
+
+    // Set fresh HTTPOnly cookies so subsequent authFetch calls work
+    setAuthCookies(
+      c,
+      result.session.access_token,
+      result.session.refresh_token,
+      3600,   // 1 hour access token
+      604800  // 7 days refresh token
+    );
+
+    return c.json({
+      success: true,
+      access_token: result.session.access_token,
+    });
+  }
+);
 
 export default app;
